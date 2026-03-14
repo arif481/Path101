@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.config import ADMIN_API_KEY
 from app.db import get_db
-from app.models.db_models import BanditLog, SafetyFlag
+from app.models.db_models import BanditLog, Plan, SafetyFlag, SessionRecord
 from app.schemas import (
     ActionAnalyticsItem,
     BanditAnalyticsResponse,
@@ -14,6 +14,8 @@ from app.schemas import (
     ResolveFlagRequest,
     SafetyFlagItem,
     SchedulerTickResponse,
+    UserAnalyticsItem,
+    UserAnalyticsResponse,
     WorkerEventItem,
 )
 from app.services.redis_queue import queue_health
@@ -144,3 +146,93 @@ def admin_action_analytics(
         )
 
     return BanditAnalyticsResponse(days=safe_days, total_events=total_events, actions=actions)
+
+
+def _compute_reward_trend(rewards: list[float]) -> str:
+    if len(rewards) < 4:
+        return "insufficient"
+
+    midpoint = len(rewards) // 2
+    first_half = rewards[:midpoint]
+    second_half = rewards[midpoint:]
+    if not first_half or not second_half:
+        return "insufficient"
+
+    first_avg = sum(first_half) / len(first_half)
+    second_avg = sum(second_half) / len(second_half)
+    delta = second_avg - first_avg
+    if delta > 0.05:
+        return "up"
+    if delta < -0.05:
+        return "down"
+    return "flat"
+
+
+@router.get("/analytics/users", response_model=UserAnalyticsResponse, dependencies=[Depends(require_admin_key)])
+def admin_user_analytics(
+    days: int = 30,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+) -> UserAnalyticsResponse:
+    safe_days = max(1, min(days, 365))
+    safe_limit = max(1, min(limit, 100))
+    cutoff = datetime.utcnow() - timedelta(days=safe_days)
+
+    sessions_statement = (
+        select(
+            SessionRecord.user_id,
+            func.count(SessionRecord.id),
+            func.sum(case((SessionRecord.completed_bool.is_(True), 1), else_=0)),
+        )
+        .join(Plan, SessionRecord.plan_id == Plan.id)
+        .where(Plan.start_date >= cutoff)
+        .group_by(SessionRecord.user_id)
+    )
+
+    session_stats: dict[str, tuple[int, int]] = {}
+    for user_id, total_count, completed_count in db.execute(sessions_statement).all():
+        if not isinstance(user_id, str):
+            continue
+        session_stats[user_id] = (int(total_count or 0), int(completed_count or 0))
+
+    rewards_statement = (
+        select(BanditLog.user_id, BanditLog.reward, BanditLog.timestamp)
+        .where(BanditLog.timestamp >= cutoff)
+        .order_by(BanditLog.user_id.asc(), BanditLog.timestamp.asc())
+    )
+
+    reward_series: dict[str, list[float]] = {}
+    last_activity: dict[str, datetime] = {}
+    for user_id, reward, timestamp in db.execute(rewards_statement).all():
+        if not isinstance(user_id, str) or timestamp is None:
+            continue
+
+        reward_series.setdefault(user_id, []).append(float(reward or 0.0))
+        last_activity[user_id] = timestamp
+
+    user_ids = set(session_stats.keys()) | set(reward_series.keys())
+    rows: list[UserAnalyticsItem] = []
+    for user_id in user_ids:
+        sessions_total, sessions_completed = session_stats.get(user_id, (0, 0))
+        completion_rate = (sessions_completed / sessions_total) if sessions_total > 0 else 0.0
+
+        rewards = reward_series.get(user_id, [])
+        avg_reward = (sum(rewards) / len(rewards)) if rewards else 0.0
+        trend = _compute_reward_trend(rewards)
+
+        rows.append(
+            UserAnalyticsItem(
+                user_id=user_id,
+                sessions_total=sessions_total,
+                sessions_completed=sessions_completed,
+                completion_rate=completion_rate,
+                avg_reward=avg_reward,
+                reward_trend=trend,
+                last_activity=last_activity.get(user_id),
+            )
+        )
+
+    rows.sort(key=lambda item: (item.completion_rate, item.avg_reward, item.sessions_total), reverse=True)
+    rows = rows[:safe_limit]
+
+    return UserAnalyticsResponse(days=safe_days, total_users=len(rows), users=rows)

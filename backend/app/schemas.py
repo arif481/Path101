@@ -130,3 +130,19 @@ class BanditAnalyticsResponse(BaseModel):
     days: int
     total_events: int
     actions: list[ActionAnalyticsItem]
+
+
+class UserAnalyticsItem(BaseModel):
+    user_id: str
+    sessions_total: int
+    sessions_completed: int
+    completion_rate: float
+    avg_reward: float
+    reward_trend: Literal["up", "down", "flat", "insufficient"]
+    last_activity: datetime | None
+
+
+class UserAnalyticsResponse(BaseModel):
+    days: int
+    total_users: int
+    users: list[UserAnalyticsItem]

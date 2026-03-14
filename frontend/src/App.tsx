@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   getActionAnalytics,
+  getUserAnalytics,
   authAnonymous,
   authLogin,
   authMe,
@@ -22,6 +23,7 @@ import type {
   SchedulerTickResponse,
   SafetyFlagItem,
   SessionCompleteResponse,
+  UserAnalyticsResponse,
   WorkerEventItem,
 } from "./types";
 
@@ -48,6 +50,7 @@ export function App() {
   const [schedulerTick, setSchedulerTick] = useState<SchedulerTickResponse | null>(null);
   const [analyticsDays, setAnalyticsDays] = useState(30);
   const [analyticsResult, setAnalyticsResult] = useState<BanditAnalyticsResponse | null>(null);
+  const [userAnalyticsResult, setUserAnalyticsResult] = useState<UserAnalyticsResponse | null>(null);
   const [pollMode, setPollMode] = useState(false);
   const [flagFilter, setFlagFilter] = useState("pending");
   const [adminLoading, setAdminLoading] = useState(false);
@@ -341,6 +344,24 @@ export function App() {
     try {
       const result = await getActionAnalytics(adminKey.trim(), analyticsDays, 20);
       setAnalyticsResult(result);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onLoadUserAnalytics() {
+    if (!adminKey.trim()) {
+      setError("Admin key is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const result = await getUserAnalytics(adminKey.trim(), analyticsDays, 20);
+      setUserAnalyticsResult(result);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
@@ -648,6 +669,9 @@ export function App() {
             <button type="button" onClick={onLoadActionAnalytics} disabled={adminLoading}>
               {adminLoading ? "Loading..." : "Load Action Analytics"}
             </button>
+            <button type="button" onClick={onLoadUserAnalytics} disabled={adminLoading}>
+              {adminLoading ? "Loading..." : "Load User Analytics"}
+            </button>
           </div>
 
           {analyticsResult && (
@@ -662,6 +686,25 @@ export function App() {
                   {analyticsResult.actions.map((item) => (
                     <li key={item.action_id}>
                       {item.action_id} • count: {item.count} • avg reward: {item.avg_reward.toFixed(2)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {userAnalyticsResult && (
+            <div className="top-gap">
+              <p>
+                User analytics: {userAnalyticsResult.total_users} user(s) in last {userAnalyticsResult.days} day(s)
+              </p>
+              {userAnalyticsResult.users.length === 0 ? (
+                <p className="subtle">No user analytics available.</p>
+              ) : (
+                <ul>
+                  {userAnalyticsResult.users.map((user) => (
+                    <li key={user.user_id}>
+                      {user.user_id} • completion: {(user.completion_rate * 100).toFixed(1)}% ({user.sessions_completed}/{user.sessions_total}) • avg reward: {user.avg_reward.toFixed(2)} • trend: {user.reward_trend}
                     </li>
                   ))}
                 </ul>

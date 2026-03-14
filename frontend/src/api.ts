@@ -10,6 +10,7 @@ import type {
   SchedulerTickResponse,
   SafetyFlagItem,
   SessionCompleteResponse,
+  UserAnalyticsResponse,
   WorkerEventItem,
 } from "./types";
 
@@ -210,4 +211,21 @@ export async function getActionAnalytics(
   }
 
   return response.json() as Promise<BanditAnalyticsResponse>;
+}
+
+export async function getUserAnalytics(
+  adminKey: string,
+  days = 30,
+  limit = 20
+): Promise<UserAnalyticsResponse> {
+  const response = await fetch(`${BASE_URL}/admin/analytics/users?days=${days}&limit=${limit}`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("User analytics request failed");
+  }
+
+  return response.json() as Promise<UserAnalyticsResponse>;
 }

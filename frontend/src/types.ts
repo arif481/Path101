@@ -102,3 +102,19 @@ export type BanditAnalyticsResponse = {
   total_events: number;
   actions: ActionAnalyticsItem[];
 };
+
+export type UserAnalyticsItem = {
+  user_id: string;
+  sessions_total: number;
+  sessions_completed: number;
+  completion_rate: number;
+  avg_reward: number;
+  reward_trend: "up" | "down" | "flat" | "insufficient";
+  last_activity: string | null;
+};
+
+export type UserAnalyticsResponse = {
+  days: number;
+  total_users: number;
+  users: UserAnalyticsItem[];
+};
