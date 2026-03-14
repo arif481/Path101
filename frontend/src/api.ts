@@ -42,6 +42,17 @@ function adminHeaders(adminKey: string): Record<string, string> {
   };
 }
 
+function triggerCsvDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 export async function authAnonymous(): Promise<AnonymousAuthResponse> {
   const response = await fetch(`${BASE_URL}/auth/anonymous`, {
     method: "POST",
@@ -228,4 +239,40 @@ export async function getUserAnalytics(
   }
 
   return response.json() as Promise<UserAnalyticsResponse>;
+}
+
+export async function downloadActionAnalyticsCsv(
+  adminKey: string,
+  days = 30,
+  limit = 20
+): Promise<void> {
+  const response = await fetch(`${BASE_URL}/admin/analytics/actions.csv?days=${days}&limit=${limit}`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Action analytics CSV download failed");
+  }
+
+  const blob = await response.blob();
+  triggerCsvDownload(blob, `path101_action_analytics_${days}d.csv`);
+}
+
+export async function downloadUserAnalyticsCsv(
+  adminKey: string,
+  days = 30,
+  limit = 20
+): Promise<void> {
+  const response = await fetch(`${BASE_URL}/admin/analytics/users.csv?days=${days}&limit=${limit}`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("User analytics CSV download failed");
+  }
+
+  const blob = await response.blob();
+  triggerCsvDownload(blob, `path101_user_analytics_${days}d.csv`);
 }

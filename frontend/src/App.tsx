@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import {
+  downloadActionAnalyticsCsv,
+  downloadUserAnalyticsCsv,
   getActionAnalytics,
   getUserAnalytics,
   authAnonymous,
@@ -369,6 +371,40 @@ export function App() {
     }
   }
 
+  async function onDownloadActionAnalyticsCsv() {
+    if (!adminKey.trim()) {
+      setError("Admin key is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      await downloadActionAnalyticsCsv(adminKey.trim(), analyticsDays, 20);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onDownloadUserAnalyticsCsv() {
+    if (!adminKey.trim()) {
+      setError("Admin key is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      await downloadUserAnalyticsCsv(adminKey.trim(), analyticsDays, 20);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
   return (
     <main className="layout">
       <section className="card">
@@ -671,6 +707,12 @@ export function App() {
             </button>
             <button type="button" onClick={onLoadUserAnalytics} disabled={adminLoading}>
               {adminLoading ? "Loading..." : "Load User Analytics"}
+            </button>
+            <button type="button" onClick={onDownloadActionAnalyticsCsv} disabled={adminLoading}>
+              {adminLoading ? "Loading..." : "Download Action CSV"}
+            </button>
+            <button type="button" onClick={onDownloadUserAnalyticsCsv} disabled={adminLoading}>
+              {adminLoading ? "Loading..." : "Download User CSV"}
             </button>
           </div>
 

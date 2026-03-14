@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
+import csv
+import io
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
@@ -148,6 +150,36 @@ def admin_action_analytics(
     return BanditAnalyticsResponse(days=safe_days, total_events=total_events, actions=actions)
 
 
+@router.get("/analytics/actions.csv", dependencies=[Depends(require_admin_key)])
+def admin_action_analytics_csv(
+    days: int = 30,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+) -> Response:
+    result = admin_action_analytics(days=days, limit=limit, db=db)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["days", "total_events", "action_id", "count", "avg_reward", "last_seen"])
+    for item in result.actions:
+        writer.writerow(
+            [
+                result.days,
+                result.total_events,
+                item.action_id,
+                item.count,
+                f"{item.avg_reward:.6f}",
+                item.last_seen.isoformat(),
+            ]
+        )
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="path101_action_analytics_{result.days}d.csv"'},
+    )
+
+
 def _compute_reward_trend(rewards: list[float]) -> str:
     if len(rewards) < 4:
         return "insufficient"
@@ -236,3 +268,48 @@ def admin_user_analytics(
     rows = rows[:safe_limit]
 
     return UserAnalyticsResponse(days=safe_days, total_users=len(rows), users=rows)
+
+
+@router.get("/analytics/users.csv", dependencies=[Depends(require_admin_key)])
+def admin_user_analytics_csv(
+    days: int = 30,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+) -> Response:
+    result = admin_user_analytics(days=days, limit=limit, db=db)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "days",
+            "total_users",
+            "user_id",
+            "sessions_total",
+            "sessions_completed",
+            "completion_rate",
+            "avg_reward",
+            "reward_trend",
+            "last_activity",
+        ]
+    )
+    for item in result.users:
+        writer.writerow(
+            [
+                result.days,
+                result.total_users,
+                item.user_id,
+                item.sessions_total,
+                item.sessions_completed,
+                f"{item.completion_rate:.6f}",
+                f"{item.avg_reward:.6f}",
+                item.reward_trend,
+                item.last_activity.isoformat() if item.last_activity else "",
+            ]
+        )
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="path101_user_analytics_{result.days}d.csv"'},
+    )
