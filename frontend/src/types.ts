@@ -59,3 +59,18 @@ export type MeResponse = {
   anonymous: boolean;
   created_at: string;
 };
+
+export type SafetyFlagItem = {
+  id: number;
+  user_id: string;
+  trigger_type: string;
+  review_status: string;
+  created_at: string;
+};
+
+export type QueueHealthResponse = {
+  connected: boolean;
+  queue_size: number;
+};
+
+export type ResolveReviewStatus = "resolved" | "dismissed";

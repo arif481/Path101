@@ -1,9 +1,21 @@
 import { useEffect, useState } from "react";
-import { authAnonymous, authLogin, authMe, authRegister, completeSession, submitIntake } from "./api";
+import {
+  authAnonymous,
+  authLogin,
+  authMe,
+  authRegister,
+  completeSession,
+  getAdminQueueHealth,
+  listSafetyFlags,
+  resolveSafetyFlag,
+  submitIntake,
+} from "./api";
 import type {
   AnonymousAuthResponse,
   AuthTokenResponse,
   IntakeResponse,
+  QueueHealthResponse,
+  SafetyFlagItem,
   SessionCompleteResponse,
 } from "./types";
 
@@ -21,6 +33,11 @@ export function App() {
   const [availableTimes, setAvailableTimes] = useState("7-9pm weekdays");
   const [intakeResult, setIntakeResult] = useState<IntakeResponse | null>(null);
   const [sessionResult, setSessionResult] = useState<SessionCompleteResponse | null>(null);
+  const [adminKey, setAdminKey] = useState("");
+  const [flags, setFlags] = useState<SafetyFlagItem[]>([]);
+  const [queueHealth, setQueueHealth] = useState<QueueHealthResponse | null>(null);
+  const [flagFilter, setFlagFilter] = useState("pending");
+  const [adminLoading, setAdminLoading] = useState(false);
   const [preMood, setPreMood] = useState(5);
   const [postMood, setPostMood] = useState(6);
   const [feedback, setFeedback] = useState("");
@@ -156,6 +173,59 @@ export function App() {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function onLoadQueueHealth() {
+    if (!adminKey.trim()) {
+      setError("Admin key is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const health = await getAdminQueueHealth(adminKey.trim());
+      setQueueHealth(health);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onLoadFlags() {
+    if (!adminKey.trim()) {
+      setError("Admin key is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const result = await listSafetyFlags(adminKey.trim(), flagFilter);
+      setFlags(result);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onResolveFlag(flagId: number, reviewStatus: "resolved" | "dismissed") {
+    if (!adminKey.trim()) {
+      setError("Admin key is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      await resolveSafetyFlag(adminKey.trim(), flagId, reviewStatus);
+      await onLoadFlags();
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+      setAdminLoading(false);
     }
   }
 
@@ -343,6 +413,74 @@ export function App() {
       )}
 
       {error && <section className="card danger">{error}</section>}
+
+      <section className="card">
+        <h2>Admin Safety</h2>
+        <div className="stack">
+          <label>
+            Admin Key
+            <input
+              type="password"
+              value={adminKey}
+              onChange={(event) => setAdminKey(event.target.value)}
+              placeholder="Enter X-Admin-Key value"
+            />
+          </label>
+
+          <div className="stack">
+            <button type="button" onClick={onLoadQueueHealth} disabled={adminLoading}>
+              {adminLoading ? "Loading..." : "Check Queue Health"}
+            </button>
+            {queueHealth && (
+              <p>
+                Queue: {queueHealth.connected ? "connected" : "disconnected"} • Pending jobs: {queueHealth.queue_size}
+              </p>
+            )}
+          </div>
+
+          <label>
+            Flag Filter
+            <select value={flagFilter} onChange={(event) => setFlagFilter(event.target.value)}>
+              <option value="all">all</option>
+              <option value="pending">pending</option>
+              <option value="resolved">resolved</option>
+              <option value="dismissed">dismissed</option>
+            </select>
+          </label>
+
+          <button type="button" onClick={onLoadFlags} disabled={adminLoading}>
+            {adminLoading ? "Loading..." : "Load Safety Flags"}
+          </button>
+
+          {flags.length === 0 ? (
+            <p className="subtle">No flags for this filter.</p>
+          ) : (
+            <ul>
+              {flags.map((flag) => (
+                <li key={flag.id} className="top-gap">
+                  <strong>#{flag.id}</strong> {flag.trigger_type} • {flag.review_status} • {flag.user_id}
+                  <div className="stack top-gap">
+                    <button
+                      type="button"
+                      onClick={() => onResolveFlag(flag.id, "resolved")}
+                      disabled={adminLoading || flag.review_status === "resolved"}
+                    >
+                      Mark Resolved
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onResolveFlag(flag.id, "dismissed")}
+                      disabled={adminLoading || flag.review_status === "dismissed"}
+                    >
+                      Mark Dismissed
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
 
       <section className="card">
         <h2>Need urgent help?</h2>

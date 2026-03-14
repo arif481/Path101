@@ -4,6 +4,9 @@ import type {
   IntakeRequest,
   IntakeResponse,
   MeResponse,
+  QueueHealthResponse,
+  ResolveReviewStatus,
+  SafetyFlagItem,
   SessionCompleteResponse,
 } from "./types";
 
@@ -26,6 +29,12 @@ export async function submitIntake(payload: IntakeRequest): Promise<IntakeRespon
 function authHeaders(token: string): Record<string, string> {
   return {
     Authorization: `Bearer ${token}`,
+  };
+}
+
+function adminHeaders(adminKey: string): Record<string, string> {
+  return {
+    "X-Admin-Key": adminKey,
   };
 }
 
@@ -99,4 +108,60 @@ export async function completeSession(
   }
 
   return response.json() as Promise<SessionCompleteResponse>;
+}
+
+export async function getAdminQueueHealth(adminKey: string): Promise<QueueHealthResponse> {
+  const response = await fetch(`${BASE_URL}/admin/queue-health`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Queue health request failed");
+  }
+
+  return response.json() as Promise<QueueHealthResponse>;
+}
+
+export async function listSafetyFlags(
+  adminKey: string,
+  reviewStatus?: string
+): Promise<SafetyFlagItem[]> {
+  const params = new URLSearchParams();
+  if (reviewStatus && reviewStatus !== "all") {
+    params.set("review_status", reviewStatus);
+  }
+
+  const query = params.toString();
+  const url = `${BASE_URL}/admin/flags${query ? `?${query}` : ""}`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Safety flags request failed");
+  }
+
+  return response.json() as Promise<SafetyFlagItem[]>;
+}
+
+export async function resolveSafetyFlag(
+  adminKey: string,
+  flagId: number,
+  reviewStatus: ResolveReviewStatus
+): Promise<void> {
+  const response = await fetch(`${BASE_URL}/admin/flag/${flagId}/resolve`, {
+    method: "POST",
+    headers: {
+      ...adminHeaders(adminKey),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ review_status: reviewStatus }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Resolve flag request failed");
+  }
 }
