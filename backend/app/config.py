@@ -52,7 +52,7 @@ SETTINGS = Settings(
         os.getenv("TRUSTED_HOSTS"),
         ["127.0.0.1", "localhost"],
     ),
-    auto_migrate=parse_bool(os.getenv("AUTO_MIGRATE"), True),
+    auto_migrate=parse_bool(os.getenv("AUTO_MIGRATE"), False),
 )
 
 

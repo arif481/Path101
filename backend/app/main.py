@@ -37,6 +37,7 @@ def startup() -> None:
     validate_startup_settings(SETTINGS)
 
     if AUTO_MIGRATE:
+        logging.warning("AUTO_MIGRATE is enabled; prefer Alembic migrations for managed environments")
         Base.metadata.create_all(bind=engine)
 
 

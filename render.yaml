@@ -4,11 +4,15 @@ services:
     env: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         sync: false
+      - key: APP_ENV
+        value: production
+      - key: AUTO_MIGRATE
+        value: "false"
       - key: JWT_SECRET
         sync: false
       - key: JWT_EXPIRES_MINUTES
@@ -18,6 +22,8 @@ services:
       - key: REDIS_URL
         sync: false
       - key: CORS_ORIGINS
+        sync: false
+      - key: TRUSTED_HOSTS
         sync: false
 
   - type: static

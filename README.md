@@ -13,6 +13,7 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -22,6 +23,13 @@ Optional DB configuration:
 cp .env.example .env
 # edit DATABASE_URL if using PostgreSQL
 # set JWT_SECRET and ADMIN_API_KEY
+```
+
+Create a new migration after model changes:
+
+```bash
+alembic revision --autogenerate -m "describe change"
+alembic upgrade head
 ```
 
 API docs: http://127.0.0.1:8000/docs
@@ -113,5 +121,6 @@ For `path101-web`:
 ## Production hardening notes
 
 - The API now validates critical settings at startup when `APP_ENV=production`.
-- Avoid `AUTO_MIGRATE=true` in production after initial bootstrap; use migrations workflow.
+- Use Alembic migrations (`alembic upgrade head`) for schema changes in all managed environments.
+- `AUTO_MIGRATE` is opt-in and defaults to `false`; leave it disabled in production.
 - CORS and trusted hosts are environment-driven (`CORS_ORIGINS`, `TRUSTED_HOSTS`).
