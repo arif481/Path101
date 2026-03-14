@@ -1,9 +1,22 @@
-import { useState } from "react";
-import { completeSession, submitIntake } from "./api";
-import type { IntakeResponse, SessionCompleteResponse } from "./types";
+import { useEffect, useState } from "react";
+import { authAnonymous, authLogin, authMe, authRegister, completeSession, submitIntake } from "./api";
+import type {
+  AnonymousAuthResponse,
+  AuthTokenResponse,
+  IntakeResponse,
+  SessionCompleteResponse,
+} from "./types";
+
+const TOKEN_KEY = "path101.token";
+const USER_KEY = "path101.user";
+const ANON_KEY = "path101.anonymous";
 
 export function App() {
-  const [userId, setUserId] = useState("demo-user");
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [anonymous, setAnonymous] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [text, setText] = useState("");
   const [availableTimes, setAvailableTimes] = useState("7-9pm weekdays");
   const [intakeResult, setIntakeResult] = useState<IntakeResponse | null>(null);
@@ -14,8 +27,90 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const storedToken = localStorage.getItem(TOKEN_KEY);
+    const storedUser = localStorage.getItem(USER_KEY);
+    const storedAnon = localStorage.getItem(ANON_KEY);
+
+    if (!storedToken || !storedUser) {
+      return;
+    }
+
+    setAuthToken(storedToken);
+    setUserId(storedUser);
+    setAnonymous(storedAnon === "true");
+
+    void authMe(storedToken).catch(() => {
+      clearSession();
+    });
+  }, []);
+
+  function persistSession(result: AuthTokenResponse | AnonymousAuthResponse) {
+    setAuthToken(result.access_token);
+    setUserId(result.user_id);
+    setAnonymous(result.anonymous);
+    localStorage.setItem(TOKEN_KEY, result.access_token);
+    localStorage.setItem(USER_KEY, result.user_id);
+    localStorage.setItem(ANON_KEY, String(result.anonymous));
+  }
+
+  function clearSession() {
+    setAuthToken(null);
+    setUserId(null);
+    setAnonymous(false);
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(ANON_KEY);
+  }
+
+  async function onAnonymousSignIn() {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await authAnonymous();
+      persistSession(result);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onRegister(event: React.FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await authRegister(email, password);
+      persistSession(result);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onLogin(event: React.FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await authLogin(email, password);
+      persistSession(result);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function onSubmitIntake(event: React.FormEvent) {
     event.preventDefault();
+    if (!userId) {
+      setError("Sign in first to create a plan.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSessionResult(null);
@@ -67,15 +162,84 @@ export function App() {
   return (
     <main className="layout">
       <section className="card">
+        <h2>Account</h2>
+        {userId ? (
+          <div className="stack">
+            <p>
+              Signed in as <strong>{userId}</strong> ({anonymous ? "anonymous" : "registered"})
+            </p>
+            <button type="button" onClick={clearSession} disabled={loading}>
+              Sign out
+            </button>
+          </div>
+        ) : (
+          <div className="stack">
+            <button type="button" onClick={onAnonymousSignIn} disabled={loading}>
+              Continue anonymously
+            </button>
+
+            <form onSubmit={onRegister} className="stack">
+              <h3>Register</h3>
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                />
+              </label>
+              <button type="submit" disabled={loading}>
+                Register
+              </button>
+            </form>
+
+            <form onSubmit={onLogin} className="stack">
+              <h3>Login</h3>
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                />
+              </label>
+              <button type="submit" disabled={loading}>
+                Login
+              </button>
+            </form>
+          </div>
+        )}
+      </section>
+
+      <section className="card">
         <h1>Path101 MVP</h1>
         <p className="subtle">
           Tell me the single problem you want to change and one measurable goal.
         </p>
         <form onSubmit={onSubmitIntake} className="stack">
-          <label>
-            User ID
-            <input value={userId} onChange={(event) => setUserId(event.target.value)} required />
-          </label>
+          <p>
+            <strong>User:</strong> {userId ?? "Not signed in"}
+          </p>
           <label>
             Intake Text
             <textarea

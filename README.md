@@ -64,3 +64,54 @@ Open: http://127.0.0.1:5173
 - Current storage is SQLAlchemy-backed (`sqlite` by default, PostgreSQL-ready via `DATABASE_URL`).
 - Crisis-like language triggers triage messaging and safety flag behavior stub.
 - Next step is frontend auth integration, recurring scheduler worker, and bandit policy service.
+
+## Deploy (Render blueprint)
+
+This repo includes `render.yaml` for one backend web service and one static frontend service.
+
+### 1) Push latest code to GitHub
+
+```bash
+git push origin main
+```
+
+### 2) Create services in Render
+
+- In Render dashboard choose **New +** → **Blueprint**.
+- Connect your GitHub repo and select branch `main`.
+- Render will detect `render.yaml` and create:
+	- `path101-api` (FastAPI)
+	- `path101-web` (Vite static site)
+
+### 3) Set environment variables
+
+For `path101-api`:
+- `DATABASE_URL` = your production PostgreSQL URL
+- `APP_ENV` = `production`
+- `AUTO_MIGRATE` = `false` (recommended in production)
+- `JWT_SECRET` = long random string
+- `ADMIN_API_KEY` = long random string
+- `REDIS_URL` = your Redis instance URL
+- `CORS_ORIGINS` = frontend URL(s), comma-separated (e.g. `https://path101-web.onrender.com`)
+- `TRUSTED_HOSTS` = backend host(s), comma-separated (e.g. `path101-api.onrender.com`)
+
+For `path101-web`:
+- `VITE_API_BASE_URL` = deployed backend URL (e.g. `https://path101-api.onrender.com`)
+
+### 4) Redeploy frontend after setting `VITE_API_BASE_URL`
+
+- In Render `path101-web` service, click **Manual Deploy** → **Deploy latest commit**.
+
+### 5) Post-deploy checks
+
+- Backend health: `GET /health`
+- Frontend loads and can:
+	- continue anonymously
+	- register/login
+	- create intake plan
+
+## Production hardening notes
+
+- The API now validates critical settings at startup when `APP_ENV=production`.
+- Avoid `AUTO_MIGRATE=true` in production after initial bootstrap; use migrations workflow.
+- CORS and trusted hosts are environment-driven (`CORS_ORIGINS`, `TRUSTED_HOSTS`).

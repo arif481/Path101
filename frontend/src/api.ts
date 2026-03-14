@@ -1,10 +1,13 @@
 import type {
+  AnonymousAuthResponse,
+  AuthTokenResponse,
   IntakeRequest,
   IntakeResponse,
+  MeResponse,
   SessionCompleteResponse,
 } from "./types";
 
-const BASE_URL = "http://127.0.0.1:8000";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
 export async function submitIntake(payload: IntakeRequest): Promise<IntakeResponse> {
   const response = await fetch(`${BASE_URL}/intake`, {
@@ -18,6 +21,65 @@ export async function submitIntake(payload: IntakeRequest): Promise<IntakeRespon
   }
 
   return response.json() as Promise<IntakeResponse>;
+}
+
+function authHeaders(token: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${token}`,
+  };
+}
+
+export async function authAnonymous(): Promise<AnonymousAuthResponse> {
+  const response = await fetch(`${BASE_URL}/auth/anonymous`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error("Anonymous sign-in failed");
+  }
+
+  return response.json() as Promise<AnonymousAuthResponse>;
+}
+
+export async function authRegister(email: string, password: string): Promise<AuthTokenResponse> {
+  const response = await fetch(`${BASE_URL}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Registration failed");
+  }
+
+  return response.json() as Promise<AuthTokenResponse>;
+}
+
+export async function authLogin(email: string, password: string): Promise<AuthTokenResponse> {
+  const response = await fetch(`${BASE_URL}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Login failed");
+  }
+
+  return response.json() as Promise<AuthTokenResponse>;
+}
+
+export async function authMe(token: string): Promise<MeResponse> {
+  const response = await fetch(`${BASE_URL}/auth/me`, {
+    method: "GET",
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    throw new Error("Session validation failed");
+  }
+
+  return response.json() as Promise<MeResponse>;
 }
 
 export async function completeSession(

@@ -42,3 +42,20 @@ export type SessionCompleteResponse = {
   reward: number;
   rationale: string;
 };
+
+export type AuthTokenResponse = {
+  access_token: string;
+  token_type: "bearer";
+  user_id: string;
+  anonymous: boolean;
+};
+
+export type AnonymousAuthResponse = AuthTokenResponse & {
+  anon_id: string;
+};
+
+export type MeResponse = {
+  user_id: string;
+  anonymous: boolean;
+  created_at: string;
+};

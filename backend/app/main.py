@@ -1,7 +1,12 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
+from app.config import AUTO_MIGRATE, CORS_ORIGINS, SETTINGS, TRUSTED_HOSTS, validate_startup_settings
 from app.db import Base, engine
+from app.middleware import RequestContextMiddleware
 from app.models import db_models  # noqa: F401
 from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
@@ -17,16 +22,22 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
+app.add_middleware(RequestContextMiddleware)
 
 
 @app.on_event("startup")
 def startup() -> None:
-    Base.metadata.create_all(bind=engine)
+    logging.basicConfig(level=logging.INFO)
+    validate_startup_settings(SETTINGS)
+
+    if AUTO_MIGRATE:
+        Base.metadata.create_all(bind=engine)
 
 
 @app.get("/health")
