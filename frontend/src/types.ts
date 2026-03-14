@@ -83,3 +83,9 @@ export type WorkerEventItem = {
   source: string;
   timestamp: string;
 };
+
+export type SchedulerTickResponse = {
+  scanned_sessions: number;
+  acquired_locks: number;
+  enqueued_jobs: number;
+};

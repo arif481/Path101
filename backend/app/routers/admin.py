@@ -5,8 +5,15 @@ from sqlalchemy.orm import Session
 from app.config import ADMIN_API_KEY
 from app.db import get_db
 from app.models.db_models import BanditLog, SafetyFlag
-from app.schemas import QueueHealthResponse, ResolveFlagRequest, SafetyFlagItem, WorkerEventItem
+from app.schemas import (
+    QueueHealthResponse,
+    ResolveFlagRequest,
+    SafetyFlagItem,
+    SchedulerTickResponse,
+    WorkerEventItem,
+)
 from app.services.redis_queue import queue_health
+from app.worker import run_scheduler_tick
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -84,3 +91,9 @@ def admin_worker_events(limit: int = 25, db: Session = Depends(get_db)) -> list[
         )
 
     return response
+
+
+@router.post("/scheduler/tick", response_model=SchedulerTickResponse, dependencies=[Depends(require_admin_key)])
+def admin_scheduler_tick() -> SchedulerTickResponse:
+    result = run_scheduler_tick()
+    return SchedulerTickResponse(**result)

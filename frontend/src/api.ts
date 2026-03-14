@@ -6,6 +6,7 @@ import type {
   MeResponse,
   QueueHealthResponse,
   ResolveReviewStatus,
+  SchedulerTickResponse,
   SafetyFlagItem,
   SessionCompleteResponse,
   WorkerEventItem,
@@ -178,4 +179,17 @@ export async function listWorkerEvents(adminKey: string, limit = 25): Promise<Wo
   }
 
   return response.json() as Promise<WorkerEventItem[]>;
+}
+
+export async function triggerSchedulerTick(adminKey: string): Promise<SchedulerTickResponse> {
+  const response = await fetch(`${BASE_URL}/admin/scheduler/tick`, {
+    method: "POST",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Scheduler tick request failed");
+  }
+
+  return response.json() as Promise<SchedulerTickResponse>;
 }

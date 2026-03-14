@@ -10,12 +10,14 @@ import {
   listWorkerEvents,
   resolveSafetyFlag,
   submitIntake,
+  triggerSchedulerTick,
 } from "./api";
 import type {
   AnonymousAuthResponse,
   AuthTokenResponse,
   IntakeResponse,
   QueueHealthResponse,
+  SchedulerTickResponse,
   SafetyFlagItem,
   SessionCompleteResponse,
   WorkerEventItem,
@@ -39,6 +41,7 @@ export function App() {
   const [flags, setFlags] = useState<SafetyFlagItem[]>([]);
   const [queueHealth, setQueueHealth] = useState<QueueHealthResponse | null>(null);
   const [workerEvents, setWorkerEvents] = useState<WorkerEventItem[]>([]);
+  const [schedulerTick, setSchedulerTick] = useState<SchedulerTickResponse | null>(null);
   const [flagFilter, setFlagFilter] = useState("pending");
   const [adminLoading, setAdminLoading] = useState(false);
   const [preMood, setPreMood] = useState(5);
@@ -243,6 +246,24 @@ export function App() {
     try {
       const events = await listWorkerEvents(adminKey.trim(), 25);
       setWorkerEvents(events);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onTriggerSchedulerTick() {
+    if (!adminKey.trim()) {
+      setError("Admin key is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const result = await triggerSchedulerTick(adminKey.trim());
+      setSchedulerTick(result);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
@@ -504,6 +525,16 @@ export function App() {
           <button type="button" onClick={onLoadWorkerEvents} disabled={adminLoading}>
             {adminLoading ? "Loading..." : "Load Worker Activity"}
           </button>
+
+          <button type="button" onClick={onTriggerSchedulerTick} disabled={adminLoading}>
+            {adminLoading ? "Loading..." : "Run Scheduler Tick Now"}
+          </button>
+
+          {schedulerTick && (
+            <p>
+              Tick result — scanned: {schedulerTick.scanned_sessions}, locks: {schedulerTick.acquired_locks}, enqueued: {schedulerTick.enqueued_jobs}
+            </p>
+          )}
 
           {workerEvents.length === 0 ? (
             <p className="subtle">No worker events loaded.</p>

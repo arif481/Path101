@@ -111,3 +111,9 @@ class WorkerEventItem(BaseModel):
     reward: float
     source: str
     timestamp: datetime
+
+
+class SchedulerTickResponse(BaseModel):
+    scanned_sessions: int
+    acquired_locks: int
+    enqueued_jobs: int

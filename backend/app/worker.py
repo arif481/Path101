@@ -87,7 +87,7 @@ def process_job(job: dict[str, Any]) -> bool:
         db.close()
 
 
-def run_scheduler_tick() -> None:
+def run_scheduler_tick() -> dict[str, int]:
     now = datetime.utcnow()
     lookahead_time = now + timedelta(minutes=NUDGE_LOOKAHEAD_MINUTES)
     lookback_time = now - timedelta(hours=NUDGE_LOOKBACK_HOURS)
@@ -104,6 +104,8 @@ def run_scheduler_tick() -> None:
         )
         sessions = db.scalars(statement).all()
 
+        scanned = len(sessions)
+        locked = 0
         scheduled = 0
         for session in sessions:
             if session.scheduled_at is None:
@@ -112,6 +114,8 @@ def run_scheduler_tick() -> None:
             lock_key = f"{session.id}:{now.date().isoformat()}"
             if not acquire_nudge_lock(lock_key, NUDGE_LOCK_TTL_SECONDS):
                 continue
+
+            locked += 1
 
             enqueued = enqueue_session_job(
                 job_type="session_nudge",
@@ -126,6 +130,12 @@ def run_scheduler_tick() -> None:
 
         if scheduled:
             logger.info("Scheduler enqueued session_nudge jobs=%s", scheduled)
+
+        return {
+            "scanned_sessions": scanned,
+            "acquired_locks": locked,
+            "enqueued_jobs": scheduled,
+        }
     finally:
         db.close()
 
