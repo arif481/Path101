@@ -6,8 +6,13 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import ADMIN_EMAIL_ALLOWLIST
 from app.models.db_models import AuthAccount, User
 from app.security import hash_email, hash_password, verify_password
+
+
+def _is_admin_email(email: str) -> bool:
+    return email.strip().lower() in set(ADMIN_EMAIL_ALLOWLIST)
 
 
 def create_anonymous_user(db: Session) -> User:
@@ -43,6 +48,7 @@ def register_user(db: Session, email: str, password: str) -> User:
         user_id=user.id,
         email_hash=email_digest,
         password_hash=hash_password(password),
+        is_admin=_is_admin_email(email),
         created_at=datetime.utcnow(),
     )
     db.add(auth_account)
@@ -59,4 +65,10 @@ def login_user(db: Session, email: str, password: str) -> User:
     user = db.get(User, account.user_id)
     if user is None:
         raise ValueError("User not found")
+
+    if _is_admin_email(email) and not account.is_admin:
+        account.is_admin = True
+        db.add(account)
+        db.flush()
+
     return user

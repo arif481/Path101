@@ -39,13 +39,14 @@ export function App() {
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [anonymous, setAnonymous] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [text, setText] = useState("");
   const [availableTimes, setAvailableTimes] = useState("7-9pm weekdays");
   const [intakeResult, setIntakeResult] = useState<IntakeResponse | null>(null);
   const [sessionResult, setSessionResult] = useState<SessionCompleteResponse | null>(null);
-  const [adminKey, setAdminKey] = useState("");
+  const [adminToken, setAdminToken] = useState("");
   const [flags, setFlags] = useState<SafetyFlagItem[]>([]);
   const [queueHealth, setQueueHealth] = useState<QueueHealthResponse | null>(null);
   const [workerEvents, setWorkerEvents] = useState<WorkerEventItem[]>([]);
@@ -74,6 +75,7 @@ export function App() {
     }
 
     setAuthToken(storedToken);
+    setAdminToken(storedToken);
     setUserId(storedUser);
     setAnonymous(storedAnon === "true");
 
@@ -85,9 +87,13 @@ export function App() {
       setFlagFilter(storedFlagFilter);
     }
 
-    void authMe(storedToken).catch(() => {
-      clearSession();
-    });
+    void authMe(storedToken)
+      .then((me) => {
+        setIsAdmin(me.is_admin);
+      })
+      .catch(() => {
+        clearSession();
+      });
   }, []);
 
   useEffect(() => {
@@ -103,7 +109,7 @@ export function App() {
       return;
     }
 
-    const key = adminKey.trim();
+    const key = adminToken.trim();
     if (!key) {
       return;
     }
@@ -122,12 +128,14 @@ export function App() {
     return () => {
       window.clearInterval(timer);
     };
-  }, [pollMode, adminKey]);
+  }, [pollMode, adminToken]);
 
   function persistSession(result: AuthTokenResponse | AnonymousAuthResponse) {
     setAuthToken(result.access_token);
+    setAdminToken(result.access_token);
     setUserId(result.user_id);
     setAnonymous(result.anonymous);
+    setIsAdmin(result.is_admin);
     localStorage.setItem(TOKEN_KEY, result.access_token);
     localStorage.setItem(USER_KEY, result.user_id);
     localStorage.setItem(ANON_KEY, String(result.anonymous));
@@ -135,8 +143,10 @@ export function App() {
 
   function clearSession() {
     setAuthToken(null);
+    setAdminToken("");
     setUserId(null);
     setAnonymous(false);
+    setIsAdmin(false);
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
     localStorage.removeItem(ANON_KEY);
@@ -239,15 +249,15 @@ export function App() {
   }
 
   async function onLoadQueueHealth() {
-    if (!adminKey.trim()) {
-      setError("Admin key is required.");
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
       return;
     }
 
     setAdminLoading(true);
     setError(null);
     try {
-      const health = await getAdminQueueHealth(adminKey.trim());
+      const health = await getAdminQueueHealth(adminToken.trim());
       setQueueHealth(health);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
@@ -257,15 +267,15 @@ export function App() {
   }
 
   async function onLoadFlags() {
-    if (!adminKey.trim()) {
-      setError("Admin key is required.");
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
       return;
     }
 
     setAdminLoading(true);
     setError(null);
     try {
-      const result = await listSafetyFlags(adminKey.trim(), flagFilter);
+      const result = await listSafetyFlags(adminToken.trim(), flagFilter);
       setFlags(result);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
@@ -275,15 +285,15 @@ export function App() {
   }
 
   async function onResolveFlag(flagId: number, reviewStatus: "resolved" | "dismissed") {
-    if (!adminKey.trim()) {
-      setError("Admin key is required.");
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
       return;
     }
 
     setAdminLoading(true);
     setError(null);
     try {
-      await resolveSafetyFlag(adminKey.trim(), flagId, reviewStatus);
+      await resolveSafetyFlag(adminToken.trim(), flagId, reviewStatus);
       await onLoadFlags();
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
@@ -292,15 +302,15 @@ export function App() {
   }
 
   async function onLoadWorkerEvents() {
-    if (!adminKey.trim()) {
-      setError("Admin key is required.");
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
       return;
     }
 
     setAdminLoading(true);
     setError(null);
     try {
-      const events = await listWorkerEvents(adminKey.trim(), 25);
+      const events = await listWorkerEvents(adminToken.trim(), 25);
       setWorkerEvents(events);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
@@ -310,12 +320,12 @@ export function App() {
   }
 
   async function onTriggerSchedulerTick() {
-    if (!adminKey.trim()) {
-      setError("Admin key is required.");
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
       return;
     }
 
-    const key = adminKey.trim();
+    const key = adminToken.trim();
     setAdminLoading(true);
     setError(null);
     try {
@@ -336,15 +346,15 @@ export function App() {
   }
 
   async function onLoadActionAnalytics() {
-    if (!adminKey.trim()) {
-      setError("Admin key is required.");
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
       return;
     }
 
     setAdminLoading(true);
     setError(null);
     try {
-      const result = await getActionAnalytics(adminKey.trim(), analyticsDays, 20);
+      const result = await getActionAnalytics(adminToken.trim(), analyticsDays, 20);
       setAnalyticsResult(result);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
@@ -354,15 +364,15 @@ export function App() {
   }
 
   async function onLoadUserAnalytics() {
-    if (!adminKey.trim()) {
-      setError("Admin key is required.");
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
       return;
     }
 
     setAdminLoading(true);
     setError(null);
     try {
-      const result = await getUserAnalytics(adminKey.trim(), analyticsDays, 20);
+      const result = await getUserAnalytics(adminToken.trim(), analyticsDays, 20);
       setUserAnalyticsResult(result);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
@@ -372,15 +382,15 @@ export function App() {
   }
 
   async function onDownloadActionAnalyticsCsv() {
-    if (!adminKey.trim()) {
-      setError("Admin key is required.");
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
       return;
     }
 
     setAdminLoading(true);
     setError(null);
     try {
-      await downloadActionAnalyticsCsv(adminKey.trim(), analyticsDays, 20);
+      await downloadActionAnalyticsCsv(adminToken.trim(), analyticsDays, 20);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
@@ -389,15 +399,15 @@ export function App() {
   }
 
   async function onDownloadUserAnalyticsCsv() {
-    if (!adminKey.trim()) {
-      setError("Admin key is required.");
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
       return;
     }
 
     setAdminLoading(true);
     setError(null);
     try {
-      await downloadUserAnalyticsCsv(adminKey.trim(), analyticsDays, 20);
+      await downloadUserAnalyticsCsv(adminToken.trim(), analyticsDays, 20);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
@@ -592,14 +602,15 @@ export function App() {
 
       <section className="card">
         <h2>Admin Safety</h2>
+        {!isAdmin && <p className="subtle">Login with an admin allowlisted account to access admin endpoints.</p>}
         <div className="stack">
           <label>
-            Admin Key
+            Admin Token
             <input
               type="password"
-              value={adminKey}
-              onChange={(event) => setAdminKey(event.target.value)}
-              placeholder="Enter X-Admin-Key value"
+              value={adminToken}
+              onChange={(event) => setAdminToken(event.target.value)}
+              placeholder="Enter admin bearer token"
             />
           </label>
 

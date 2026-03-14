@@ -36,9 +36,9 @@ function authHeaders(token: string): Record<string, string> {
   };
 }
 
-function adminHeaders(adminKey: string): Record<string, string> {
+function adminHeaders(adminToken: string): Record<string, string> {
   return {
-    "X-Admin-Key": adminKey,
+    Authorization: `Bearer ${adminToken}`,
   };
 }
 

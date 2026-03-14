@@ -6,12 +6,21 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from app.config import JWT_ALGORITHM, JWT_EXPIRES_MINUTES, JWT_SECRET
+from app.config import (
+    ADMIN_RATE_LIMIT_COUNT,
+    ADMIN_RATE_LIMIT_WINDOW_SECONDS,
+    AUTH_RATE_LIMIT_COUNT,
+    AUTH_RATE_LIMIT_WINDOW_SECONDS,
+    JWT_ALGORITHM,
+    JWT_EXPIRES_MINUTES,
+    JWT_SECRET,
+)
 from app.db import get_db
-from app.models.db_models import User
+from app.models.db_models import AuthAccount, User
+from app.services.rate_limiter import rate_limiter
 
 
 class AuthError(HTTPException):
@@ -37,9 +46,9 @@ def verify_password(password: str, stored_hash: str) -> bool:
     return hmac.compare_digest(candidate, expected)
 
 
-def create_access_token(user_id: str) -> str:
+def create_access_token(user_id: str, is_admin: bool = False) -> str:
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRES_MINUTES)
-    payload = {"sub": user_id, "exp": expires_at}
+    payload = {"sub": user_id, "is_admin": is_admin, "exp": expires_at}
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
@@ -73,3 +82,46 @@ def get_current_user(
     if user is None:
         raise AuthError("User not found")
     return user
+
+
+def get_current_admin_user(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> User:
+    token = _extract_bearer_token(authorization)
+    user_id = decode_access_token(token)
+    user = db.get(User, user_id)
+    if user is None:
+        raise AuthError("User not found")
+
+    account = db.get(AuthAccount, user_id)
+    if account is None or not account.is_admin:
+        raise AuthError("Admin privileges required")
+
+    return user
+
+
+def _request_client_key(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def auth_rate_limit(request: Request) -> None:
+    key = f"auth:{_request_client_key(request)}"
+    allowed = rate_limiter.allow(
+        key=key,
+        limit=AUTH_RATE_LIMIT_COUNT,
+        window_seconds=AUTH_RATE_LIMIT_WINDOW_SECONDS,
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many auth requests")
+
+
+def admin_rate_limit(request: Request, user: User = Depends(get_current_admin_user)) -> None:
+    key = f"admin:{user.id}:{_request_client_key(request)}"
+    allowed = rate_limiter.allow(
+        key=key,
+        limit=ADMIN_RATE_LIMIT_COUNT,
+        window_seconds=ADMIN_RATE_LIMIT_WINDOW_SECONDS,
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many admin requests")

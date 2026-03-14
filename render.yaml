@@ -17,7 +17,7 @@ services:
         sync: false
       - key: JWT_EXPIRES_MINUTES
         value: "10080"
-      - key: ADMIN_API_KEY
+      - key: ADMIN_EMAIL_ALLOWLIST
         sync: false
       - key: REDIS_URL
         sync: false
@@ -55,7 +55,7 @@ services:
         value: "3"
       - key: JWT_SECRET
         sync: false
-      - key: ADMIN_API_KEY
+      - key: ADMIN_EMAIL_ALLOWLIST
         sync: false
 
   - type: static

@@ -2,11 +2,10 @@ from datetime import datetime, timedelta
 import csv
 import io
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from app.config import ADMIN_API_KEY
 from app.db import get_db
 from app.models.db_models import BanditLog, Plan, SafetyFlag, SessionRecord
 from app.schemas import (
@@ -20,18 +19,14 @@ from app.schemas import (
     UserAnalyticsResponse,
     WorkerEventItem,
 )
+from app.security import admin_rate_limit
 from app.services.redis_queue import queue_health
 from app.worker import run_scheduler_tick
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def require_admin_key(x_admin_key: str | None = Header(default=None)) -> None:
-    if not x_admin_key or x_admin_key != ADMIN_API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid admin key")
-
-
-@router.get("/flags", response_model=list[SafetyFlagItem], dependencies=[Depends(require_admin_key)])
+@router.get("/flags", response_model=list[SafetyFlagItem], dependencies=[Depends(admin_rate_limit)])
 def list_flags(
     review_status: str | None = None,
     db: Session = Depends(get_db),
@@ -53,7 +48,7 @@ def list_flags(
     ]
 
 
-@router.post("/flag/{flag_id}/resolve", dependencies=[Depends(require_admin_key)])
+@router.post("/flag/{flag_id}/resolve", dependencies=[Depends(admin_rate_limit)])
 def resolve_flag(flag_id: int, payload: ResolveFlagRequest, db: Session = Depends(get_db)) -> dict[str, str]:
     row = db.get(SafetyFlag, flag_id)
     if row is None:
@@ -65,13 +60,13 @@ def resolve_flag(flag_id: int, payload: ResolveFlagRequest, db: Session = Depend
     return {"status": "ok"}
 
 
-@router.get("/queue-health", response_model=QueueHealthResponse, dependencies=[Depends(require_admin_key)])
+@router.get("/queue-health", response_model=QueueHealthResponse, dependencies=[Depends(admin_rate_limit)])
 def admin_queue_health() -> QueueHealthResponse:
     health = queue_health()
     return QueueHealthResponse(**health)
 
 
-@router.get("/worker-events", response_model=list[WorkerEventItem], dependencies=[Depends(require_admin_key)])
+@router.get("/worker-events", response_model=list[WorkerEventItem], dependencies=[Depends(admin_rate_limit)])
 def admin_worker_events(limit: int = 25, db: Session = Depends(get_db)) -> list[WorkerEventItem]:
     safe_limit = max(1, min(limit, 200))
     statement = select(BanditLog).order_by(BanditLog.timestamp.desc()).limit(safe_limit)
@@ -101,13 +96,13 @@ def admin_worker_events(limit: int = 25, db: Session = Depends(get_db)) -> list[
     return response
 
 
-@router.post("/scheduler/tick", response_model=SchedulerTickResponse, dependencies=[Depends(require_admin_key)])
+@router.post("/scheduler/tick", response_model=SchedulerTickResponse, dependencies=[Depends(admin_rate_limit)])
 def admin_scheduler_tick() -> SchedulerTickResponse:
     result = run_scheduler_tick()
     return SchedulerTickResponse(**result)
 
 
-@router.get("/analytics/actions", response_model=BanditAnalyticsResponse, dependencies=[Depends(require_admin_key)])
+@router.get("/analytics/actions", response_model=BanditAnalyticsResponse, dependencies=[Depends(admin_rate_limit)])
 def admin_action_analytics(
     days: int = 30,
     limit: int = 20,
@@ -150,7 +145,7 @@ def admin_action_analytics(
     return BanditAnalyticsResponse(days=safe_days, total_events=total_events, actions=actions)
 
 
-@router.get("/analytics/actions.csv", dependencies=[Depends(require_admin_key)])
+@router.get("/analytics/actions.csv", dependencies=[Depends(admin_rate_limit)])
 def admin_action_analytics_csv(
     days: int = 30,
     limit: int = 20,
@@ -200,7 +195,7 @@ def _compute_reward_trend(rewards: list[float]) -> str:
     return "flat"
 
 
-@router.get("/analytics/users", response_model=UserAnalyticsResponse, dependencies=[Depends(require_admin_key)])
+@router.get("/analytics/users", response_model=UserAnalyticsResponse, dependencies=[Depends(admin_rate_limit)])
 def admin_user_analytics(
     days: int = 30,
     limit: int = 20,
@@ -270,7 +265,7 @@ def admin_user_analytics(
     return UserAnalyticsResponse(days=safe_days, total_users=len(rows), users=rows)
 
 
-@router.get("/analytics/users.csv", dependencies=[Depends(require_admin_key)])
+@router.get("/analytics/users.csv", dependencies=[Depends(admin_rate_limit)])
 def admin_user_analytics_csv(
     days: int = 30,
     limit: int = 20,

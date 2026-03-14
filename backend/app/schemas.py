@@ -65,6 +65,7 @@ class AuthTokenResponse(BaseModel):
     token_type: str = "bearer"
     user_id: str
     anonymous: bool
+    is_admin: bool = False
 
 
 class AnonymousAuthResponse(AuthTokenResponse):
@@ -84,6 +85,7 @@ class LoginRequest(BaseModel):
 class MeResponse(BaseModel):
     user_id: str
     anonymous: bool
+    is_admin: bool
     created_at: datetime
 
 

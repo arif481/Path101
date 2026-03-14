@@ -22,7 +22,7 @@ Optional DB configuration:
 ```bash
 cp .env.example .env
 # edit DATABASE_URL if using PostgreSQL
-# set JWT_SECRET and ADMIN_API_KEY
+# set JWT_SECRET and ADMIN_EMAIL_ALLOWLIST
 ```
 
 Create a new migration after model changes:
@@ -59,6 +59,8 @@ Worker scheduler settings (optional):
 - `NUDGE_LOCK_TTL_SECONDS` (default `86400`)
 - `BANDIT_EPSILON` (default `0.2`)
 - `BANDIT_MIN_HISTORY` (default `3`)
+- `AUTH_RATE_LIMIT_COUNT` / `AUTH_RATE_LIMIT_WINDOW_SECONDS`
+- `ADMIN_RATE_LIMIT_COUNT` / `ADMIN_RATE_LIMIT_WINDOW_SECONDS`
 
 The worker scans for incomplete sessions scheduled in the configured window and enqueues `session_nudge` jobs with Redis dedupe locks.
 Session completion recommendations use an epsilon-greedy bandit policy (`recovery_10`, `focus_15`, `deep_20`) with cold-start exploration and feedback guardrails.
@@ -82,9 +84,10 @@ Open: http://127.0.0.1:5173
 - `POST /intake`
 - `GET /plan/{user_id}`
 - `POST /session/{session_id}/complete`
-- `GET /admin/flags` (requires `X-Admin-Key`)
-- `POST /admin/flag/{id}/resolve` (requires `X-Admin-Key`)
-- `GET /admin/queue-health` (requires `X-Admin-Key`)
+- `GET /admin/flags` (requires admin Bearer token)
+- `POST /admin/flag/{id}/resolve` (requires admin Bearer token)
+- `GET /admin/queue-health` (requires admin Bearer token)
+- `GET /admin/analytics/actions` and `GET /admin/analytics/users` (requires admin Bearer token)
 - `GET /health`
 
 ## Notes
@@ -119,7 +122,7 @@ For `path101-api`:
 - `APP_ENV` = `production`
 - `AUTO_MIGRATE` = `false` (recommended in production)
 - `JWT_SECRET` = long random string
-- `ADMIN_API_KEY` = long random string
+- `ADMIN_EMAIL_ALLOWLIST` = comma-separated admin login emails (e.g. `admin@yourdomain.com`)
 - `REDIS_URL` = your Redis instance URL
 - `CORS_ORIGINS` = frontend URL(s), comma-separated (e.g. `https://path101-web.onrender.com`)
 - `TRUSTED_HOSTS` = backend host(s), comma-separated (e.g. `path101-api.onrender.com`)

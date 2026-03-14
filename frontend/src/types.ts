@@ -48,6 +48,7 @@ export type AuthTokenResponse = {
   token_type: "bearer";
   user_id: string;
   anonymous: boolean;
+  is_admin: boolean;
 };
 
 export type AnonymousAuthResponse = AuthTokenResponse & {
@@ -57,6 +58,7 @@ export type AnonymousAuthResponse = AuthTokenResponse & {
 export type MeResponse = {
   user_id: string;
   anonymous: boolean;
+  is_admin: boolean;
   created_at: string;
 };
 
