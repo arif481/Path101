@@ -42,6 +42,7 @@ export function App() {
   const [queueHealth, setQueueHealth] = useState<QueueHealthResponse | null>(null);
   const [workerEvents, setWorkerEvents] = useState<WorkerEventItem[]>([]);
   const [schedulerTick, setSchedulerTick] = useState<SchedulerTickResponse | null>(null);
+  const [pollMode, setPollMode] = useState(false);
   const [flagFilter, setFlagFilter] = useState("pending");
   const [adminLoading, setAdminLoading] = useState(false);
   const [preMood, setPreMood] = useState(5);
@@ -67,6 +68,32 @@ export function App() {
       clearSession();
     });
   }, []);
+
+  useEffect(() => {
+    if (!pollMode) {
+      return;
+    }
+
+    const key = adminKey.trim();
+    if (!key) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void Promise.all([listWorkerEvents(key, 25), getAdminQueueHealth(key)])
+        .then(([events, health]) => {
+          setWorkerEvents(events);
+          setQueueHealth(health);
+        })
+        .catch(() => {
+          setPollMode(false);
+        });
+    }, 12000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [pollMode, adminKey]);
 
   function persistSession(result: AuthTokenResponse | AnonymousAuthResponse) {
     setAuthToken(result.access_token);
@@ -478,6 +505,15 @@ export function App() {
           </label>
 
           <div className="stack">
+            <label>
+              <input
+                type="checkbox"
+                checked={pollMode}
+                onChange={(event) => setPollMode(event.target.checked)}
+              />
+              Live poll mode (12s)
+            </label>
+
             <button type="button" onClick={onLoadQueueHealth} disabled={adminLoading}>
               {adminLoading ? "Loading..." : "Check Queue Health"}
             </button>
