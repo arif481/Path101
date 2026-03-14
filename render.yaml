@@ -26,6 +26,26 @@ services:
       - key: TRUSTED_HOSTS
         sync: false
 
+  - type: worker
+    name: path101-worker
+    env: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && python -m app.worker
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_ENV
+        value: production
+      - key: AUTO_MIGRATE
+        value: "false"
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ADMIN_API_KEY
+        sync: false
+
   - type: static
     name: path101-web
     rootDir: frontend

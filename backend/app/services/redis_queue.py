@@ -38,3 +38,19 @@ def queue_health() -> dict[str, Any]:
         return {"connected": True, "queue_size": int(size)}
     except redis.RedisError:
         return {"connected": False, "queue_size": -1}
+
+
+def dequeue_session_job(timeout_seconds: int = 5) -> dict[str, Any] | None:
+    try:
+        client = _get_client()
+        item = client.blpop(QUEUE_KEY, timeout=timeout_seconds)
+        if item is None:
+            return None
+
+        _, raw_value = item
+        payload = json.loads(raw_value)
+        if isinstance(payload, dict):
+            return payload
+        return None
+    except (redis.RedisError, json.JSONDecodeError):
+        return None

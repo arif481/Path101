@@ -43,6 +43,14 @@ sudo systemctl enable --now redis-server
 redis-cli ping
 ```
 
+Run worker locally (separate terminal):
+
+```bash
+cd backend
+source .venv/bin/activate
+python -m app.worker
+```
+
 ### 2) Frontend
 
 ```bash
@@ -75,7 +83,7 @@ Open: http://127.0.0.1:5173
 
 ## Deploy (Render blueprint)
 
-This repo includes `render.yaml` for one backend web service and one static frontend service.
+This repo includes `render.yaml` for backend API, backend worker, and static frontend services.
 
 ### 1) Push latest code to GitHub
 
@@ -89,6 +97,7 @@ git push origin main
 - Connect your GitHub repo and select branch `main`.
 - Render will detect `render.yaml` and create:
 	- `path101-api` (FastAPI)
+	- `path101-worker` (Redis queue consumer)
 	- `path101-web` (Vite static site)
 
 ### 3) Set environment variables
