@@ -26,6 +26,8 @@ import type {
 const TOKEN_KEY = "path101.token";
 const USER_KEY = "path101.user";
 const ANON_KEY = "path101.anonymous";
+const ADMIN_POLL_KEY = "path101.admin.poll_mode";
+const ADMIN_FLAG_FILTER_KEY = "path101.admin.flag_filter";
 
 export function App() {
   const [authToken, setAuthToken] = useState<string | null>(null);
@@ -55,6 +57,8 @@ export function App() {
     const storedToken = localStorage.getItem(TOKEN_KEY);
     const storedUser = localStorage.getItem(USER_KEY);
     const storedAnon = localStorage.getItem(ANON_KEY);
+    const storedPollMode = localStorage.getItem(ADMIN_POLL_KEY);
+    const storedFlagFilter = localStorage.getItem(ADMIN_FLAG_FILTER_KEY);
 
     if (!storedToken || !storedUser) {
       return;
@@ -64,10 +68,26 @@ export function App() {
     setUserId(storedUser);
     setAnonymous(storedAnon === "true");
 
+    if (storedPollMode === "true") {
+      setPollMode(true);
+    }
+
+    if (storedFlagFilter && ["all", "pending", "resolved", "dismissed"].includes(storedFlagFilter)) {
+      setFlagFilter(storedFlagFilter);
+    }
+
     void authMe(storedToken).catch(() => {
       clearSession();
     });
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(ADMIN_POLL_KEY, String(pollMode));
+  }, [pollMode]);
+
+  useEffect(() => {
+    localStorage.setItem(ADMIN_FLAG_FILTER_KEY, flagFilter);
+  }, [flagFilter]);
 
   useEffect(() => {
     if (!pollMode) {
