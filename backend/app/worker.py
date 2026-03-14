@@ -50,8 +50,11 @@ def process_job(job: dict[str, Any]) -> bool:
 
     if job_type == "session_completed":
         reward = _extract_float(payload.get("reward"))
-        action_id = str(payload.get("session_id", "session_unknown"))
+        action_id = str(payload.get("action_id") or payload.get("session_id") or "session_unknown")
+        policy_version = str(payload.get("policy_version") or "v0")
+        context_json = payload.get("context") if isinstance(payload.get("context"), dict) else {}
         context_json = {
+            **context_json,
             "pre_mood": payload.get("pre_mood"),
             "post_mood": payload.get("post_mood"),
             "source": "worker_queue",
@@ -59,6 +62,7 @@ def process_job(job: dict[str, Any]) -> bool:
     else:
         reward = 0.0
         action_id = f"nudge:{payload.get('session_id', 'session_unknown')}"
+        policy_version = "v0"
         context_json = {
             "scheduled_at": payload.get("scheduled_at"),
             "session_id": payload.get("session_id"),
@@ -71,13 +75,13 @@ def process_job(job: dict[str, Any]) -> bool:
             user_id=user_id,
             context_json=context_json,
             action_id=action_id,
-            policy_version="v0",
+            policy_version=policy_version,
             reward=reward,
             timestamp=datetime.utcnow(),
         )
         db.add(bandit_log)
         db.commit()
-        logger.info("Processed session_completed for user_id=%s action_id=%s", user_id, action_id)
+        logger.info("Processed %s for user_id=%s action_id=%s", job_type, user_id, action_id)
         return True
     except Exception:
         db.rollback()

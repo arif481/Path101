@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.schemas import SessionCompleteRequest, SessionCompleteResponse, SessionPlan
+from app.schemas import SessionCompleteRequest, SessionCompleteResponse
+from app.services.bandit_policy import select_next_recommendation
 from app.services.intake import compute_reward
 from app.services.persistence import complete_session as complete_session_record
 from app.services.redis_queue import enqueue_session_job
@@ -23,33 +24,29 @@ def complete_session(
     db.commit()
 
     reward = compute_reward(payload.pre_mood, payload.post_mood, returned_24h=False)
+    next_recommendation, action_id, rationale, policy_version = select_next_recommendation(
+        db=db,
+        user_id=session.user_id,
+        base_session_id=session.id,
+        feedback=payload.feedback,
+    )
+
     enqueue_session_job(
         job_type="session_completed",
         user_id=session.user_id,
         payload={
             "session_id": session.id,
+            "action_id": action_id,
+            "policy_version": policy_version,
             "reward": reward,
             "pre_mood": payload.pre_mood,
             "post_mood": payload.post_mood,
+            "context": {
+                "recommendation_title": next_recommendation.title,
+                "recommendation_difficulty": next_recommendation.difficulty,
+            },
         },
     )
-
-    next_recommendation = SessionPlan.model_validate(
-        {
-            "session_id": f"{session_id}_next",
-            "title": "Recovery micro-step",
-            "duration_mins": 10,
-            "steps": [
-                {"title": "2-minute setup", "duration_mins": 2},
-                {"title": "8-minute focused burst", "duration_mins": 8},
-            ],
-            "expected_metrics": ["completion", "mood_change"],
-            "difficulty": "low",
-            "scheduled_at": None,
-        }
-    )
-
-    rationale = "Short session selected to improve consistency after recent variability."
 
     return SessionCompleteResponse(
         next_recommendation=next_recommendation,

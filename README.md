@@ -57,8 +57,11 @@ Worker scheduler settings (optional):
 - `NUDGE_LOOKAHEAD_MINUTES` (default `30`)
 - `NUDGE_LOOKBACK_HOURS` (default `24`)
 - `NUDGE_LOCK_TTL_SECONDS` (default `86400`)
+- `BANDIT_EPSILON` (default `0.2`)
+- `BANDIT_MIN_HISTORY` (default `3`)
 
 The worker scans for incomplete sessions scheduled in the configured window and enqueues `session_nudge` jobs with Redis dedupe locks.
+Session completion recommendations use an epsilon-greedy bandit policy (`recovery_10`, `focus_15`, `deep_20`) with cold-start exploration and feedback guardrails.
 
 ### 2) Frontend
 
@@ -88,7 +91,7 @@ Open: http://127.0.0.1:5173
 
 - Current storage is SQLAlchemy-backed (`sqlite` by default, PostgreSQL-ready via `DATABASE_URL`).
 - Crisis-like language triggers triage messaging and safety flag behavior stub.
-- Next step is frontend auth integration, recurring scheduler worker, and bandit policy service.
+- Next step is deeper analytics dashboards and notification delivery channels.
 
 ## Deploy (Render blueprint)
 

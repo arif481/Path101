@@ -22,6 +22,16 @@ def parse_bool(value: str | None, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def parse_float(value: str | None, default: float) -> float:
+    if value is None:
+        return default
+
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     app_env: str
@@ -38,6 +48,8 @@ class Settings:
     nudge_lookahead_minutes: int
     nudge_lookback_hours: int
     nudge_lock_ttl_seconds: int
+    bandit_epsilon: float
+    bandit_min_history: int
 
 
 SETTINGS = Settings(
@@ -61,6 +73,8 @@ SETTINGS = Settings(
     nudge_lookahead_minutes=int(os.getenv("NUDGE_LOOKAHEAD_MINUTES", "30")),
     nudge_lookback_hours=int(os.getenv("NUDGE_LOOKBACK_HOURS", "24")),
     nudge_lock_ttl_seconds=int(os.getenv("NUDGE_LOCK_TTL_SECONDS", "86400")),
+    bandit_epsilon=parse_float(os.getenv("BANDIT_EPSILON", "0.2"), 0.2),
+    bandit_min_history=int(os.getenv("BANDIT_MIN_HISTORY", "3")),
 )
 
 
@@ -95,3 +109,5 @@ SCHEDULER_INTERVAL_SECONDS = SETTINGS.scheduler_interval_seconds
 NUDGE_LOOKAHEAD_MINUTES = SETTINGS.nudge_lookahead_minutes
 NUDGE_LOOKBACK_HOURS = SETTINGS.nudge_lookback_hours
 NUDGE_LOCK_TTL_SECONDS = SETTINGS.nudge_lock_ttl_seconds
+BANDIT_EPSILON = SETTINGS.bandit_epsilon
+BANDIT_MIN_HISTORY = SETTINGS.bandit_min_history
