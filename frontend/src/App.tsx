@@ -259,11 +259,19 @@ export function App() {
       return;
     }
 
+    const key = adminKey.trim();
     setAdminLoading(true);
     setError(null);
     try {
-      const result = await triggerSchedulerTick(adminKey.trim());
+      const result = await triggerSchedulerTick(key);
       setSchedulerTick(result);
+
+      const [events, health] = await Promise.all([
+        listWorkerEvents(key, 25),
+        getAdminQueueHealth(key),
+      ]);
+      setWorkerEvents(events);
+      setQueueHealth(health);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
