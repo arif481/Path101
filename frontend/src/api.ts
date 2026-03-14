@@ -1,4 +1,5 @@
 import type {
+  BanditAnalyticsResponse,
   AnonymousAuthResponse,
   AuthTokenResponse,
   IntakeRequest,
@@ -192,4 +193,21 @@ export async function triggerSchedulerTick(adminKey: string): Promise<SchedulerT
   }
 
   return response.json() as Promise<SchedulerTickResponse>;
+}
+
+export async function getActionAnalytics(
+  adminKey: string,
+  days = 30,
+  limit = 20
+): Promise<BanditAnalyticsResponse> {
+  const response = await fetch(`${BASE_URL}/admin/analytics/actions?days=${days}&limit=${limit}`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Action analytics request failed");
+  }
+
+  return response.json() as Promise<BanditAnalyticsResponse>;
 }

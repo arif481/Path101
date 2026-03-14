@@ -117,3 +117,16 @@ class SchedulerTickResponse(BaseModel):
     scanned_sessions: int
     acquired_locks: int
     enqueued_jobs: int
+
+
+class ActionAnalyticsItem(BaseModel):
+    action_id: str
+    count: int
+    avg_reward: float
+    last_seen: datetime
+
+
+class BanditAnalyticsResponse(BaseModel):
+    days: int
+    total_events: int
+    actions: list[ActionAnalyticsItem]

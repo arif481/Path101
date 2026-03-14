@@ -1,11 +1,15 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, Header, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import ADMIN_API_KEY
 from app.db import get_db
 from app.models.db_models import BanditLog, SafetyFlag
 from app.schemas import (
+    ActionAnalyticsItem,
+    BanditAnalyticsResponse,
     QueueHealthResponse,
     ResolveFlagRequest,
     SafetyFlagItem,
@@ -97,3 +101,46 @@ def admin_worker_events(limit: int = 25, db: Session = Depends(get_db)) -> list[
 def admin_scheduler_tick() -> SchedulerTickResponse:
     result = run_scheduler_tick()
     return SchedulerTickResponse(**result)
+
+
+@router.get("/analytics/actions", response_model=BanditAnalyticsResponse, dependencies=[Depends(require_admin_key)])
+def admin_action_analytics(
+    days: int = 30,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+) -> BanditAnalyticsResponse:
+    safe_days = max(1, min(days, 365))
+    safe_limit = max(1, min(limit, 50))
+    cutoff = datetime.utcnow() - timedelta(days=safe_days)
+
+    total_statement = select(func.count(BanditLog.id)).where(BanditLog.timestamp >= cutoff)
+    total_events = int(db.scalar(total_statement) or 0)
+
+    action_statement = (
+        select(
+            BanditLog.action_id,
+            func.count(BanditLog.id),
+            func.avg(BanditLog.reward),
+            func.max(BanditLog.timestamp),
+        )
+        .where(BanditLog.timestamp >= cutoff)
+        .group_by(BanditLog.action_id)
+        .order_by(func.avg(BanditLog.reward).desc(), func.count(BanditLog.id).desc())
+        .limit(safe_limit)
+    )
+
+    actions: list[ActionAnalyticsItem] = []
+    for action_id, count, avg_reward, last_seen in db.execute(action_statement).all():
+        if not isinstance(action_id, str) or last_seen is None:
+            continue
+
+        actions.append(
+            ActionAnalyticsItem(
+                action_id=action_id,
+                count=int(count or 0),
+                avg_reward=float(avg_reward or 0.0),
+                last_seen=last_seen,
+            )
+        )
+
+    return BanditAnalyticsResponse(days=safe_days, total_events=total_events, actions=actions)

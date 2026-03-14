@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  getActionAnalytics,
   authAnonymous,
   authLogin,
   authMe,
@@ -13,6 +14,7 @@ import {
   triggerSchedulerTick,
 } from "./api";
 import type {
+  BanditAnalyticsResponse,
   AnonymousAuthResponse,
   AuthTokenResponse,
   IntakeResponse,
@@ -44,6 +46,8 @@ export function App() {
   const [queueHealth, setQueueHealth] = useState<QueueHealthResponse | null>(null);
   const [workerEvents, setWorkerEvents] = useState<WorkerEventItem[]>([]);
   const [schedulerTick, setSchedulerTick] = useState<SchedulerTickResponse | null>(null);
+  const [analyticsDays, setAnalyticsDays] = useState(30);
+  const [analyticsResult, setAnalyticsResult] = useState<BanditAnalyticsResponse | null>(null);
   const [pollMode, setPollMode] = useState(false);
   const [flagFilter, setFlagFilter] = useState("pending");
   const [adminLoading, setAdminLoading] = useState(false);
@@ -319,6 +323,24 @@ export function App() {
       ]);
       setWorkerEvents(events);
       setQueueHealth(health);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onLoadActionAnalytics() {
+    if (!adminKey.trim()) {
+      setError("Admin key is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const result = await getActionAnalytics(adminKey.trim(), analyticsDays, 20);
+      setAnalyticsResult(result);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
@@ -610,6 +632,41 @@ export function App() {
                 </li>
               ))}
             </ul>
+          )}
+
+          <div className="stack top-gap">
+            <label>
+              Analytics window (days)
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={analyticsDays}
+                onChange={(event) => setAnalyticsDays(Number(event.target.value || 30))}
+              />
+            </label>
+            <button type="button" onClick={onLoadActionAnalytics} disabled={adminLoading}>
+              {adminLoading ? "Loading..." : "Load Action Analytics"}
+            </button>
+          </div>
+
+          {analyticsResult && (
+            <div className="top-gap">
+              <p>
+                Analytics: {analyticsResult.total_events} events in last {analyticsResult.days} day(s)
+              </p>
+              {analyticsResult.actions.length === 0 ? (
+                <p className="subtle">No action analytics available.</p>
+              ) : (
+                <ul>
+                  {analyticsResult.actions.map((item) => (
+                    <li key={item.action_id}>
+                      {item.action_id} • count: {item.count} • avg reward: {item.avg_reward.toFixed(2)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
         </div>
       </section>

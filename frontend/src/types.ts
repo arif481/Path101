@@ -89,3 +89,16 @@ export type SchedulerTickResponse = {
   acquired_locks: number;
   enqueued_jobs: number;
 };
+
+export type ActionAnalyticsItem = {
+  action_id: string;
+  count: number;
+  avg_reward: number;
+  last_seen: string;
+};
+
+export type BanditAnalyticsResponse = {
+  days: number;
+  total_events: number;
+  actions: ActionAnalyticsItem[];
+};
