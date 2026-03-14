@@ -3,12 +3,20 @@ from __future__ import annotations
 import logging
 import signal
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy import and_, select
+
+from app.config import (
+    NUDGE_LOCK_TTL_SECONDS,
+    NUDGE_LOOKAHEAD_MINUTES,
+    NUDGE_LOOKBACK_HOURS,
+    SCHEDULER_INTERVAL_SECONDS,
+)
 from app.db import SessionLocal
-from app.models.db_models import BanditLog
-from app.services.redis_queue import dequeue_session_job
+from app.models.db_models import BanditLog, SessionRecord
+from app.services.redis_queue import acquire_nudge_lock, dequeue_session_job, enqueue_session_job
 
 logger = logging.getLogger("path101.worker")
 
@@ -30,7 +38,7 @@ def _extract_float(value: Any, fallback: float = 0.0) -> float:
 
 def process_job(job: dict[str, Any]) -> bool:
     job_type = str(job.get("job_type", ""))
-    if job_type != "session_completed":
+    if job_type not in {"session_completed", "session_nudge"}:
         logger.info("Skipped unsupported job_type=%s", job_type)
         return True
 
@@ -40,14 +48,22 @@ def process_job(job: dict[str, Any]) -> bool:
         logger.warning("Invalid job payload: %s", job)
         return False
 
-    reward = _extract_float(payload.get("reward"))
-    action_id = str(payload.get("session_id", "session_unknown"))
-
-    context_json = {
-        "pre_mood": payload.get("pre_mood"),
-        "post_mood": payload.get("post_mood"),
-        "source": "worker_queue",
-    }
+    if job_type == "session_completed":
+        reward = _extract_float(payload.get("reward"))
+        action_id = str(payload.get("session_id", "session_unknown"))
+        context_json = {
+            "pre_mood": payload.get("pre_mood"),
+            "post_mood": payload.get("post_mood"),
+            "source": "worker_queue",
+        }
+    else:
+        reward = 0.0
+        action_id = f"nudge:{payload.get('session_id', 'session_unknown')}"
+        context_json = {
+            "scheduled_at": payload.get("scheduled_at"),
+            "session_id": payload.get("session_id"),
+            "source": "scheduler_nudge",
+        }
 
     db = SessionLocal()
     try:
@@ -71,6 +87,49 @@ def process_job(job: dict[str, Any]) -> bool:
         db.close()
 
 
+def run_scheduler_tick() -> None:
+    now = datetime.utcnow()
+    lookahead_time = now + timedelta(minutes=NUDGE_LOOKAHEAD_MINUTES)
+    lookback_time = now - timedelta(hours=NUDGE_LOOKBACK_HOURS)
+
+    db = SessionLocal()
+    try:
+        statement = select(SessionRecord).where(
+            and_(
+                SessionRecord.completed_bool.is_(False),
+                SessionRecord.scheduled_at.is_not(None),
+                SessionRecord.scheduled_at <= lookahead_time,
+                SessionRecord.scheduled_at >= lookback_time,
+            )
+        )
+        sessions = db.scalars(statement).all()
+
+        scheduled = 0
+        for session in sessions:
+            if session.scheduled_at is None:
+                continue
+
+            lock_key = f"{session.id}:{now.date().isoformat()}"
+            if not acquire_nudge_lock(lock_key, NUDGE_LOCK_TTL_SECONDS):
+                continue
+
+            enqueued = enqueue_session_job(
+                job_type="session_nudge",
+                user_id=session.user_id,
+                payload={
+                    "session_id": session.id,
+                    "scheduled_at": session.scheduled_at.isoformat(),
+                },
+            )
+            if enqueued:
+                scheduled += 1
+
+        if scheduled:
+            logger.info("Scheduler enqueued session_nudge jobs=%s", scheduled)
+    finally:
+        db.close()
+
+
 def run_worker(poll_sleep_seconds: float = 1.0) -> None:
     logging.basicConfig(level=logging.INFO)
     runtime = WorkerRuntime()
@@ -79,9 +138,15 @@ def run_worker(poll_sleep_seconds: float = 1.0) -> None:
     signal.signal(signal.SIGTERM, runtime.stop)
 
     logger.info("Worker started")
+    next_scheduler_run = time.monotonic()
 
     while runtime.running:
-        job = dequeue_session_job(timeout_seconds=5)
+        now = time.monotonic()
+        if now >= next_scheduler_run:
+            run_scheduler_tick()
+            next_scheduler_run = now + max(SCHEDULER_INTERVAL_SECONDS, 5)
+
+        job = dequeue_session_job(timeout_seconds=1)
         if job is None:
             continue
 

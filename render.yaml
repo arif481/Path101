@@ -41,6 +41,14 @@ services:
         value: "false"
       - key: REDIS_URL
         sync: false
+      - key: SCHEDULER_INTERVAL_SECONDS
+        value: "60"
+      - key: NUDGE_LOOKAHEAD_MINUTES
+        value: "30"
+      - key: NUDGE_LOOKBACK_HOURS
+        value: "24"
+      - key: NUDGE_LOCK_TTL_SECONDS
+        value: "86400"
       - key: JWT_SECRET
         sync: false
       - key: ADMIN_API_KEY

@@ -51,6 +51,15 @@ source .venv/bin/activate
 python -m app.worker
 ```
 
+Worker scheduler settings (optional):
+
+- `SCHEDULER_INTERVAL_SECONDS` (default `60`)
+- `NUDGE_LOOKAHEAD_MINUTES` (default `30`)
+- `NUDGE_LOOKBACK_HOURS` (default `24`)
+- `NUDGE_LOCK_TTL_SECONDS` (default `86400`)
+
+The worker scans for incomplete sessions scheduled in the configured window and enqueues `session_nudge` jobs with Redis dedupe locks.
+
 ### 2) Frontend
 
 ```bash

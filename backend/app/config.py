@@ -34,6 +34,10 @@ class Settings:
     cors_origins: list[str]
     trusted_hosts: list[str]
     auto_migrate: bool
+    scheduler_interval_seconds: int
+    nudge_lookahead_minutes: int
+    nudge_lookback_hours: int
+    nudge_lock_ttl_seconds: int
 
 
 SETTINGS = Settings(
@@ -53,6 +57,10 @@ SETTINGS = Settings(
         ["127.0.0.1", "localhost"],
     ),
     auto_migrate=parse_bool(os.getenv("AUTO_MIGRATE"), False),
+    scheduler_interval_seconds=int(os.getenv("SCHEDULER_INTERVAL_SECONDS", "60")),
+    nudge_lookahead_minutes=int(os.getenv("NUDGE_LOOKAHEAD_MINUTES", "30")),
+    nudge_lookback_hours=int(os.getenv("NUDGE_LOOKBACK_HOURS", "24")),
+    nudge_lock_ttl_seconds=int(os.getenv("NUDGE_LOCK_TTL_SECONDS", "86400")),
 )
 
 
@@ -83,3 +91,7 @@ REDIS_URL = SETTINGS.redis_url
 CORS_ORIGINS = SETTINGS.cors_origins
 TRUSTED_HOSTS = SETTINGS.trusted_hosts
 AUTO_MIGRATE = SETTINGS.auto_migrate
+SCHEDULER_INTERVAL_SECONDS = SETTINGS.scheduler_interval_seconds
+NUDGE_LOOKAHEAD_MINUTES = SETTINGS.nudge_lookahead_minutes
+NUDGE_LOOKBACK_HOURS = SETTINGS.nudge_lookback_hours
+NUDGE_LOCK_TTL_SECONDS = SETTINGS.nudge_lock_ttl_seconds

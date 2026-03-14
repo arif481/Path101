@@ -54,3 +54,13 @@ def dequeue_session_job(timeout_seconds: int = 5) -> dict[str, Any] | None:
         return None
     except (redis.RedisError, json.JSONDecodeError):
         return None
+
+
+def acquire_nudge_lock(lock_key: str, ttl_seconds: int) -> bool:
+    redis_key = f"path101:nudge_lock:{lock_key}"
+    try:
+        client = _get_client()
+        acquired = client.set(redis_key, "1", nx=True, ex=ttl_seconds)
+        return bool(acquired)
+    except redis.RedisError:
+        return False
