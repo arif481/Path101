@@ -102,3 +102,12 @@ class ResolveFlagRequest(BaseModel):
 class QueueHealthResponse(BaseModel):
     connected: bool
     queue_size: int
+
+
+class WorkerEventItem(BaseModel):
+    id: int
+    user_id: str
+    action_id: str
+    reward: float
+    source: str
+    timestamp: datetime

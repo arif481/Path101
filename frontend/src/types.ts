@@ -74,3 +74,12 @@ export type QueueHealthResponse = {
 };
 
 export type ResolveReviewStatus = "resolved" | "dismissed";
+
+export type WorkerEventItem = {
+  id: number;
+  user_id: string;
+  action_id: string;
+  reward: number;
+  source: string;
+  timestamp: string;
+};

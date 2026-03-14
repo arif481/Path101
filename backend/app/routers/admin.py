@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 
 from app.config import ADMIN_API_KEY
 from app.db import get_db
-from app.models.db_models import SafetyFlag
-from app.schemas import QueueHealthResponse, ResolveFlagRequest, SafetyFlagItem
+from app.models.db_models import BanditLog, SafetyFlag
+from app.schemas import QueueHealthResponse, ResolveFlagRequest, SafetyFlagItem, WorkerEventItem
 from app.services.redis_queue import queue_health
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -54,3 +54,33 @@ def resolve_flag(flag_id: int, payload: ResolveFlagRequest, db: Session = Depend
 def admin_queue_health() -> QueueHealthResponse:
     health = queue_health()
     return QueueHealthResponse(**health)
+
+
+@router.get("/worker-events", response_model=list[WorkerEventItem], dependencies=[Depends(require_admin_key)])
+def admin_worker_events(limit: int = 25, db: Session = Depends(get_db)) -> list[WorkerEventItem]:
+    safe_limit = max(1, min(limit, 200))
+    statement = select(BanditLog).order_by(BanditLog.timestamp.desc()).limit(safe_limit)
+    rows = db.scalars(statement).all()
+
+    response: list[WorkerEventItem] = []
+    for row in rows:
+        context_source = ""
+        if isinstance(row.context_json, dict):
+            context_source = str(row.context_json.get("source", ""))
+
+        source = context_source or "unknown"
+        if source not in {"worker_queue", "scheduler_nudge"}:
+            continue
+
+        response.append(
+            WorkerEventItem(
+                id=row.id,
+                user_id=row.user_id,
+                action_id=row.action_id,
+                reward=row.reward,
+                source=source,
+                timestamp=row.timestamp,
+            )
+        )
+
+    return response

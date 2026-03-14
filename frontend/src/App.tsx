@@ -7,6 +7,7 @@ import {
   completeSession,
   getAdminQueueHealth,
   listSafetyFlags,
+  listWorkerEvents,
   resolveSafetyFlag,
   submitIntake,
 } from "./api";
@@ -17,6 +18,7 @@ import type {
   QueueHealthResponse,
   SafetyFlagItem,
   SessionCompleteResponse,
+  WorkerEventItem,
 } from "./types";
 
 const TOKEN_KEY = "path101.token";
@@ -36,6 +38,7 @@ export function App() {
   const [adminKey, setAdminKey] = useState("");
   const [flags, setFlags] = useState<SafetyFlagItem[]>([]);
   const [queueHealth, setQueueHealth] = useState<QueueHealthResponse | null>(null);
+  const [workerEvents, setWorkerEvents] = useState<WorkerEventItem[]>([]);
   const [flagFilter, setFlagFilter] = useState("pending");
   const [adminLoading, setAdminLoading] = useState(false);
   const [preMood, setPreMood] = useState(5);
@@ -225,6 +228,24 @@ export function App() {
       await onLoadFlags();
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+      setAdminLoading(false);
+    }
+  }
+
+  async function onLoadWorkerEvents() {
+    if (!adminKey.trim()) {
+      setError("Admin key is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const events = await listWorkerEvents(adminKey.trim(), 25);
+      setWorkerEvents(events);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
       setAdminLoading(false);
     }
   }
@@ -475,6 +496,22 @@ export function App() {
                       Mark Dismissed
                     </button>
                   </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <button type="button" onClick={onLoadWorkerEvents} disabled={adminLoading}>
+            {adminLoading ? "Loading..." : "Load Worker Activity"}
+          </button>
+
+          {workerEvents.length === 0 ? (
+            <p className="subtle">No worker events loaded.</p>
+          ) : (
+            <ul>
+              {workerEvents.map((event) => (
+                <li key={event.id}>
+                  #{event.id} • {event.source} • {event.action_id} • {event.user_id} • reward: {event.reward}
                 </li>
               ))}
             </ul>

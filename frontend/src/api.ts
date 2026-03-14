@@ -8,6 +8,7 @@ import type {
   ResolveReviewStatus,
   SafetyFlagItem,
   SessionCompleteResponse,
+  WorkerEventItem,
 } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -164,4 +165,17 @@ export async function resolveSafetyFlag(
   if (!response.ok) {
     throw new Error("Resolve flag request failed");
   }
+}
+
+export async function listWorkerEvents(adminKey: string, limit = 25): Promise<WorkerEventItem[]> {
+  const response = await fetch(`${BASE_URL}/admin/worker-events?limit=${limit}`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Worker events request failed");
+  }
+
+  return response.json() as Promise<WorkerEventItem[]>;
 }
