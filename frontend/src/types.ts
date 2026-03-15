@@ -91,6 +91,11 @@ export type DeadLetterReplayResponse = {
   dead_letter_id: string;
 };
 
+export type DeadLetterBulkReplayResponse = {
+  replayed_ids: string[];
+  failed_ids: string[];
+};
+
 export type DeadLetterReplayAuditItem = {
   id: number;
   dead_letter_id: string;

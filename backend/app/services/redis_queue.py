@@ -92,25 +92,49 @@ def enqueue_dead_letter(job: dict[str, Any], reason: str) -> bool:
         return False
 
 
-def list_dead_letter_jobs(limit: int = 50) -> list[dict[str, Any]]:
+def list_dead_letter_jobs(
+    limit: int = 50,
+    offset: int = 0,
+    job_type: str | None = None,
+    user_id: str | None = None,
+    reason: str | None = None,
+) -> list[dict[str, Any]]:
     safe_limit = max(1, min(limit, 200))
+    safe_offset = max(0, offset)
+    filter_job_type = (job_type or "").strip().lower()
+    filter_user_id = (user_id or "").strip().lower()
+    filter_reason = (reason or "").strip().lower()
+
     try:
         client = _get_client()
-        raw_items = client.lrange(DEAD_LETTER_KEY, -safe_limit, -1)
+        raw_items = client.lrange(DEAD_LETTER_KEY, 0, -1)
     except redis.RedisError:
         return []
 
-    jobs: list[dict[str, Any]] = []
+    filtered_jobs: list[dict[str, Any]] = []
     for raw in reversed(raw_items):
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
             continue
 
-        if isinstance(payload, dict):
-            jobs.append(payload)
+        if not isinstance(payload, dict):
+            continue
 
-    return jobs
+        payload_job_type = str(payload.get("job_type", "")).strip().lower()
+        payload_user_id = str(payload.get("user_id", "")).strip().lower()
+        payload_reason = str(payload.get("dead_letter_reason", "")).strip().lower()
+
+        if filter_job_type and payload_job_type != filter_job_type:
+            continue
+        if filter_user_id and payload_user_id != filter_user_id:
+            continue
+        if filter_reason and filter_reason not in payload_reason:
+            continue
+
+        filtered_jobs.append(payload)
+
+    return filtered_jobs[safe_offset : safe_offset + safe_limit]
 
 
 def get_dead_letter_job(dead_letter_id: str) -> dict[str, Any] | None:
@@ -137,6 +161,24 @@ def get_dead_letter_job(dead_letter_id: str) -> dict[str, Any] | None:
             return payload
 
     return None
+
+
+def replay_dead_letter_jobs(dead_letter_ids: list[str]) -> tuple[list[str], list[str]]:
+    replayed_ids: list[str] = []
+    failed_ids: list[str] = []
+
+    for dead_letter_id in dead_letter_ids:
+        normalized_id = dead_letter_id.strip()
+        if not normalized_id:
+            continue
+
+        replayed = replay_dead_letter_job(normalized_id)
+        if replayed is None:
+            failed_ids.append(normalized_id)
+        else:
+            replayed_ids.append(normalized_id)
+
+    return replayed_ids, failed_ids
 
 
 def replay_dead_letter_job(dead_letter_id: str) -> dict[str, Any] | None:

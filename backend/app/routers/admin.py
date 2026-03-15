@@ -11,6 +11,8 @@ from app.models.db_models import BanditLog, DeadLetterReplayAudit, Plan, SafetyF
 from app.schemas import (
     ActionAnalyticsItem,
     BanditAnalyticsResponse,
+    DeadLetterBulkReplayRequest,
+    DeadLetterBulkReplayResponse,
     DeadLetterJobItem,
     DeadLetterReplayAuditItem,
     DeadLetterReplayResponse,
@@ -23,7 +25,13 @@ from app.schemas import (
     WorkerEventItem,
 )
 from app.security import admin_rate_limit, get_current_admin_user
-from app.services.redis_queue import get_dead_letter_job, list_dead_letter_jobs, queue_health, replay_dead_letter_job
+from app.services.redis_queue import (
+    get_dead_letter_job,
+    list_dead_letter_jobs,
+    queue_health,
+    replay_dead_letter_job,
+    replay_dead_letter_jobs,
+)
 from app.worker import run_scheduler_tick
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -84,8 +92,20 @@ def admin_queue_health() -> QueueHealthResponse:
 
 
 @router.get("/dead-letter-jobs", response_model=list[DeadLetterJobItem], dependencies=[Depends(admin_rate_limit)])
-def admin_dead_letter_jobs(limit: int = 50) -> list[DeadLetterJobItem]:
-    jobs = list_dead_letter_jobs(limit=limit)
+def admin_dead_letter_jobs(
+    limit: int = 50,
+    offset: int = 0,
+    job_type: str | None = None,
+    user_id: str | None = None,
+    reason: str | None = None,
+) -> list[DeadLetterJobItem]:
+    jobs = list_dead_letter_jobs(
+        limit=limit,
+        offset=offset,
+        job_type=job_type,
+        user_id=user_id,
+        reason=reason,
+    )
     response: list[DeadLetterJobItem] = []
 
     for item in jobs:
@@ -112,6 +132,25 @@ def admin_dead_letter_jobs(limit: int = 50) -> list[DeadLetterJobItem]:
     return response
 
 
+def _record_dead_letter_replay_audit(
+    db: Session,
+    *,
+    dead_letter_id: str,
+    job: dict[str, object],
+    admin_user_id: str,
+    replay_status: str,
+) -> None:
+    audit_row = DeadLetterReplayAudit(
+        dead_letter_id=dead_letter_id,
+        job_type=str(job.get("job_type") or "unknown"),
+        job_user_id=str(job.get("user_id") or "unknown"),
+        admin_user_id=admin_user_id,
+        replay_status=replay_status,
+        replayed_at=datetime.utcnow(),
+    )
+    db.add(audit_row)
+
+
 @router.post(
     "/dead-letter-jobs/{dead_letter_id}/replay",
     response_model=DeadLetterReplayResponse,
@@ -128,15 +167,13 @@ def admin_replay_dead_letter_job(
     replay_status = "replayed" if replayed_job is not None else "failed"
     reference_job = replayed_job or existing_job or {}
 
-    audit_row = DeadLetterReplayAudit(
+    _record_dead_letter_replay_audit(
+        db,
         dead_letter_id=dead_letter_id,
-        job_type=str(reference_job.get("job_type") or "unknown"),
-        job_user_id=str(reference_job.get("user_id") or "unknown"),
+        job=reference_job,
         admin_user_id=admin_user.id,
         replay_status=replay_status,
-        replayed_at=datetime.utcnow(),
     )
-    db.add(audit_row)
     db.commit()
 
     if replayed_job is None:
@@ -145,14 +182,83 @@ def admin_replay_dead_letter_job(
     return DeadLetterReplayResponse(status="replayed", dead_letter_id=dead_letter_id)
 
 
+@router.post(
+    "/dead-letter-jobs/replay-bulk",
+    response_model=DeadLetterBulkReplayResponse,
+    dependencies=[Depends(admin_rate_limit)],
+)
+def admin_replay_dead_letter_jobs_bulk(
+    payload: DeadLetterBulkReplayRequest,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_current_admin_user),
+) -> DeadLetterBulkReplayResponse:
+    normalized_ids = [value.strip() for value in payload.dead_letter_ids if value.strip()]
+    if not normalized_ids:
+        raise HTTPException(status_code=400, detail="No valid dead_letter_ids provided")
+
+    seen_ids = set()
+    unique_ids = []
+    for dead_letter_id in normalized_ids:
+        if dead_letter_id in seen_ids:
+            continue
+        seen_ids.add(dead_letter_id)
+        unique_ids.append(dead_letter_id)
+
+    existing_jobs = {
+        dead_letter_id: (get_dead_letter_job(dead_letter_id) or {"job_type": "unknown", "user_id": "unknown"})
+        for dead_letter_id in unique_ids
+    }
+
+    replayed_ids, failed_ids = replay_dead_letter_jobs(unique_ids)
+
+    replayed_set = set(replayed_ids)
+    for dead_letter_id in unique_ids:
+        status = "replayed" if dead_letter_id in replayed_set else "failed"
+        reference_job = existing_jobs.get(dead_letter_id, {"job_type": "unknown", "user_id": "unknown"})
+        _record_dead_letter_replay_audit(
+            db,
+            dead_letter_id=dead_letter_id,
+            job=reference_job,
+            admin_user_id=admin_user.id,
+            replay_status=status,
+        )
+
+    db.commit()
+    return DeadLetterBulkReplayResponse(replayed_ids=replayed_ids, failed_ids=failed_ids)
+
+
 @router.get(
     "/dead-letter-replays",
     response_model=list[DeadLetterReplayAuditItem],
     dependencies=[Depends(admin_rate_limit)],
 )
 def admin_dead_letter_replays(limit: int = 50, db: Session = Depends(get_db)) -> list[DeadLetterReplayAuditItem]:
+    return _admin_dead_letter_replays_filtered(limit=limit, offset=0, db=db)
+
+
+def _admin_dead_letter_replays_filtered(
+    limit: int,
+    offset: int,
+    db: Session,
+    replay_status: str | None = None,
+    admin_user_id: str | None = None,
+    job_user_id: str | None = None,
+    dead_letter_id: str | None = None,
+) -> list[DeadLetterReplayAuditItem]:
     safe_limit = max(1, min(limit, 200))
-    statement = select(DeadLetterReplayAudit).order_by(DeadLetterReplayAudit.replayed_at.desc()).limit(safe_limit)
+    safe_offset = max(0, offset)
+
+    statement = select(DeadLetterReplayAudit)
+    if replay_status:
+        statement = statement.where(DeadLetterReplayAudit.replay_status == replay_status)
+    if admin_user_id:
+        statement = statement.where(DeadLetterReplayAudit.admin_user_id == admin_user_id)
+    if job_user_id:
+        statement = statement.where(DeadLetterReplayAudit.job_user_id == job_user_id)
+    if dead_letter_id:
+        statement = statement.where(DeadLetterReplayAudit.dead_letter_id == dead_letter_id)
+
+    statement = statement.order_by(DeadLetterReplayAudit.replayed_at.desc()).offset(safe_offset).limit(safe_limit)
     rows = db.scalars(statement).all()
 
     return [
@@ -167,6 +273,31 @@ def admin_dead_letter_replays(limit: int = 50, db: Session = Depends(get_db)) ->
         )
         for row in rows
     ]
+
+
+@router.get(
+    "/dead-letter-replays/filter",
+    response_model=list[DeadLetterReplayAuditItem],
+    dependencies=[Depends(admin_rate_limit)],
+)
+def admin_dead_letter_replays_filtered(
+    limit: int = 50,
+    offset: int = 0,
+    replay_status: str | None = None,
+    admin_user_id: str | None = None,
+    job_user_id: str | None = None,
+    dead_letter_id: str | None = None,
+    db: Session = Depends(get_db),
+) -> list[DeadLetterReplayAuditItem]:
+    return _admin_dead_letter_replays_filtered(
+        limit=limit,
+        offset=offset,
+        replay_status=replay_status,
+        admin_user_id=admin_user_id,
+        job_user_id=job_user_id,
+        dead_letter_id=dead_letter_id,
+        db=db,
+    )
 
 
 @router.get("/dead-letter-replays.csv", dependencies=[Depends(admin_rate_limit)])

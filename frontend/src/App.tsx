@@ -16,6 +16,7 @@ import {
   listDeadLetterReplays,
   listWorkerEvents,
   replayDeadLetterJob,
+  replayDeadLetterJobsBulk,
   resolveSafetyFlag,
   submitIntake,
   triggerSchedulerTick,
@@ -57,6 +58,15 @@ export function App() {
   const [queueHealth, setQueueHealth] = useState<QueueHealthResponse | null>(null);
   const [deadLetterJobs, setDeadLetterJobs] = useState<DeadLetterJobItem[]>([]);
   const [deadLetterReplays, setDeadLetterReplays] = useState<DeadLetterReplayAuditItem[]>([]);
+  const [selectedDeadLetterIds, setSelectedDeadLetterIds] = useState<string[]>([]);
+  const [deadLetterOffset, setDeadLetterOffset] = useState(0);
+  const [deadLetterReplayOffset, setDeadLetterReplayOffset] = useState(0);
+  const [deadLetterJobTypeFilter, setDeadLetterJobTypeFilter] = useState("");
+  const [deadLetterUserFilter, setDeadLetterUserFilter] = useState("");
+  const [deadLetterReasonFilter, setDeadLetterReasonFilter] = useState("");
+  const [deadLetterReplayStatusFilter, setDeadLetterReplayStatusFilter] = useState("");
+  const [deadLetterReplayAdminFilter, setDeadLetterReplayAdminFilter] = useState("");
+  const [deadLetterReplayUserFilter, setDeadLetterReplayUserFilter] = useState("");
   const [workerEvents, setWorkerEvents] = useState<WorkerEventItem[]>([]);
   const [schedulerTick, setSchedulerTick] = useState<SchedulerTickResponse | null>(null);
   const [analyticsDays, setAnalyticsDays] = useState(30);
@@ -126,8 +136,20 @@ export function App() {
       void Promise.all([
         listWorkerEvents(key, 25),
         getAdminQueueHealth(key),
-        listDeadLetterJobs(key, 25),
-        listDeadLetterReplays(key, 25),
+        listDeadLetterJobs(key, {
+          limit: 25,
+          offset: deadLetterOffset,
+          jobType: deadLetterJobTypeFilter.trim(),
+          userId: deadLetterUserFilter.trim(),
+          reason: deadLetterReasonFilter.trim(),
+        }),
+        listDeadLetterReplays(key, {
+          limit: 25,
+          offset: deadLetterReplayOffset,
+          replayStatus: deadLetterReplayStatusFilter.trim(),
+          adminUserId: deadLetterReplayAdminFilter.trim(),
+          jobUserId: deadLetterReplayUserFilter.trim(),
+        }),
       ])
         .then(([events, health, deadLetters, replayAudits]) => {
           setWorkerEvents(events);
@@ -143,7 +165,18 @@ export function App() {
     return () => {
       window.clearInterval(timer);
     };
-  }, [pollMode, adminToken]);
+  }, [
+    pollMode,
+    adminToken,
+    deadLetterOffset,
+    deadLetterReplayOffset,
+    deadLetterJobTypeFilter,
+    deadLetterUserFilter,
+    deadLetterReasonFilter,
+    deadLetterReplayStatusFilter,
+    deadLetterReplayAdminFilter,
+    deadLetterReplayUserFilter,
+  ]);
 
   function persistSession(result: AuthTokenResponse | AnonymousAuthResponse) {
     setAuthToken(result.access_token);
@@ -165,6 +198,29 @@ export function App() {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
     localStorage.removeItem(ANON_KEY);
+  }
+
+  async function loadDeadLetterJobsForAdmin(key: string) {
+    const jobs = await listDeadLetterJobs(key, {
+      limit: 25,
+      offset: deadLetterOffset,
+      jobType: deadLetterJobTypeFilter.trim(),
+      userId: deadLetterUserFilter.trim(),
+      reason: deadLetterReasonFilter.trim(),
+    });
+    setDeadLetterJobs(jobs);
+    setSelectedDeadLetterIds((previous) => previous.filter((id) => jobs.some((item) => item.dead_letter_id === id)));
+  }
+
+  async function loadDeadLetterReplaysForAdmin(key: string) {
+    const replayAudits = await listDeadLetterReplays(key, {
+      limit: 25,
+      offset: deadLetterReplayOffset,
+      replayStatus: deadLetterReplayStatusFilter.trim(),
+      adminUserId: deadLetterReplayAdminFilter.trim(),
+      jobUserId: deadLetterReplayUserFilter.trim(),
+    });
+    setDeadLetterReplays(replayAudits);
   }
 
   async function onAnonymousSignIn() {
@@ -343,8 +399,7 @@ export function App() {
     setAdminLoading(true);
     setError(null);
     try {
-      const jobs = await listDeadLetterJobs(adminToken.trim(), 25);
-      setDeadLetterJobs(jobs);
+      await loadDeadLetterJobsForAdmin(adminToken.trim());
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
@@ -363,14 +418,55 @@ export function App() {
     setError(null);
     try {
       await replayDeadLetterJob(key, deadLetterId);
-      const [jobs, health] = await Promise.all([
-        listDeadLetterJobs(key, 25),
+      const [health] = await Promise.all([
         getAdminQueueHealth(key),
+        loadDeadLetterJobsForAdmin(key),
+        loadDeadLetterReplaysForAdmin(key),
       ]);
-      setDeadLetterJobs(jobs);
       setQueueHealth(health);
-      const replayAudits = await listDeadLetterReplays(key, 25);
-      setDeadLetterReplays(replayAudits);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  function onToggleDeadLetterSelection(deadLetterId: string) {
+    setSelectedDeadLetterIds((previous) => {
+      if (previous.includes(deadLetterId)) {
+        return previous.filter((id) => id !== deadLetterId);
+      }
+      return [...previous, deadLetterId];
+    });
+  }
+
+  async function onReplaySelectedDeadLetters() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    if (selectedDeadLetterIds.length === 0) {
+      setError("Select at least one dead-letter job.");
+      return;
+    }
+
+    const key = adminToken.trim();
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const result = await replayDeadLetterJobsBulk(key, selectedDeadLetterIds);
+      setSelectedDeadLetterIds([]);
+      const [health] = await Promise.all([
+        getAdminQueueHealth(key),
+        loadDeadLetterJobsForAdmin(key),
+        loadDeadLetterReplaysForAdmin(key),
+      ]);
+      setQueueHealth(health);
+
+      if (result.failed_ids.length > 0) {
+        setError(`Some replay operations failed: ${result.failed_ids.join(", ")}`);
+      }
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
@@ -387,7 +483,120 @@ export function App() {
     setAdminLoading(true);
     setError(null);
     try {
-      const replayAudits = await listDeadLetterReplays(adminToken.trim(), 25);
+      await loadDeadLetterReplaysForAdmin(adminToken.trim());
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  function onApplyDeadLetterFilters() {
+    setDeadLetterOffset(0);
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    const key = adminToken.trim();
+    setAdminLoading(true);
+    setError(null);
+    void listDeadLetterJobs(key, {
+      limit: 25,
+      offset: 0,
+      jobType: deadLetterJobTypeFilter.trim(),
+      userId: deadLetterUserFilter.trim(),
+      reason: deadLetterReasonFilter.trim(),
+    })
+      .then((jobs) => {
+        setDeadLetterJobs(jobs);
+        setSelectedDeadLetterIds((previous) =>
+          previous.filter((id) => jobs.some((item) => item.dead_letter_id === id))
+        );
+      })
+      .catch((caughtError: unknown) => {
+        setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+      })
+      .finally(() => {
+        setAdminLoading(false);
+      });
+  }
+
+  function onApplyDeadLetterReplayFilters() {
+    setDeadLetterReplayOffset(0);
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    const key = adminToken.trim();
+    setAdminLoading(true);
+    setError(null);
+    void listDeadLetterReplays(key, {
+      limit: 25,
+      offset: 0,
+      replayStatus: deadLetterReplayStatusFilter.trim(),
+      adminUserId: deadLetterReplayAdminFilter.trim(),
+      jobUserId: deadLetterReplayUserFilter.trim(),
+    })
+      .then((replayAudits) => {
+        setDeadLetterReplays(replayAudits);
+      })
+      .catch((caughtError: unknown) => {
+        setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+      })
+      .finally(() => {
+        setAdminLoading(false);
+      });
+  }
+
+  async function onDeadLetterPageChange(nextOffset: number) {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    const safeOffset = Math.max(0, nextOffset);
+    const key = adminToken.trim();
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const jobs = await listDeadLetterJobs(key, {
+        limit: 25,
+        offset: safeOffset,
+        jobType: deadLetterJobTypeFilter.trim(),
+        userId: deadLetterUserFilter.trim(),
+        reason: deadLetterReasonFilter.trim(),
+      });
+      setDeadLetterOffset(safeOffset);
+      setDeadLetterJobs(jobs);
+      setSelectedDeadLetterIds((previous) => previous.filter((id) => jobs.some((item) => item.dead_letter_id === id)));
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onDeadLetterReplayPageChange(nextOffset: number) {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    const safeOffset = Math.max(0, nextOffset);
+    const key = adminToken.trim();
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const replayAudits = await listDeadLetterReplays(key, {
+        limit: 25,
+        offset: safeOffset,
+        replayStatus: deadLetterReplayStatusFilter.trim(),
+        adminUserId: deadLetterReplayAdminFilter.trim(),
+        jobUserId: deadLetterReplayUserFilter.trim(),
+      });
+      setDeadLetterReplayOffset(safeOffset);
       setDeadLetterReplays(replayAudits);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
@@ -778,9 +987,115 @@ export function App() {
             {adminLoading ? "Loading..." : "Load Dead-Letter Jobs"}
           </button>
 
+          <label>
+            Dead-letter job_type filter
+            <input
+              value={deadLetterJobTypeFilter}
+              onChange={(event) => setDeadLetterJobTypeFilter(event.target.value)}
+              placeholder="session_completed"
+            />
+          </label>
+
+          <label>
+            Dead-letter user filter
+            <input
+              value={deadLetterUserFilter}
+              onChange={(event) => setDeadLetterUserFilter(event.target.value)}
+              placeholder="user id"
+            />
+          </label>
+
+          <label>
+            Dead-letter reason contains
+            <input
+              value={deadLetterReasonFilter}
+              onChange={(event) => setDeadLetterReasonFilter(event.target.value)}
+              placeholder="max_retries_exceeded"
+            />
+          </label>
+
+          <div className="stack">
+            <button type="button" onClick={onApplyDeadLetterFilters} disabled={adminLoading}>
+              {adminLoading ? "Loading..." : "Apply Dead-Letter Filters"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void onDeadLetterPageChange(deadLetterOffset - 25);
+              }}
+              disabled={adminLoading || deadLetterOffset === 0}
+            >
+              Previous Dead-Letter Page
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void onDeadLetterPageChange(deadLetterOffset + 25);
+              }}
+              disabled={adminLoading || deadLetterJobs.length < 25}
+            >
+              Next Dead-Letter Page
+            </button>
+          </div>
+
+          <p className="subtle">Dead-letter offset: {deadLetterOffset}</p>
+
           <button type="button" onClick={onLoadDeadLetterReplays} disabled={adminLoading}>
             {adminLoading ? "Loading..." : "Load Dead-Letter Replay Audits"}
           </button>
+
+          <label>
+            Replay status filter
+            <input
+              value={deadLetterReplayStatusFilter}
+              onChange={(event) => setDeadLetterReplayStatusFilter(event.target.value)}
+              placeholder="replayed or failed"
+            />
+          </label>
+
+          <label>
+            Replay admin user filter
+            <input
+              value={deadLetterReplayAdminFilter}
+              onChange={(event) => setDeadLetterReplayAdminFilter(event.target.value)}
+              placeholder="admin user id"
+            />
+          </label>
+
+          <label>
+            Replay job user filter
+            <input
+              value={deadLetterReplayUserFilter}
+              onChange={(event) => setDeadLetterReplayUserFilter(event.target.value)}
+              placeholder="job user id"
+            />
+          </label>
+
+          <div className="stack">
+            <button type="button" onClick={onApplyDeadLetterReplayFilters} disabled={adminLoading}>
+              {adminLoading ? "Loading..." : "Apply Replay Audit Filters"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void onDeadLetterReplayPageChange(deadLetterReplayOffset - 25);
+              }}
+              disabled={adminLoading || deadLetterReplayOffset === 0}
+            >
+              Previous Replay Page
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void onDeadLetterReplayPageChange(deadLetterReplayOffset + 25);
+              }}
+              disabled={adminLoading || deadLetterReplays.length < 25}
+            >
+              Next Replay Page
+            </button>
+          </div>
+
+          <p className="subtle">Replay audit offset: {deadLetterReplayOffset}</p>
 
           <button type="button" onClick={onDownloadDeadLetterReplaysCsv} disabled={adminLoading}>
             {adminLoading ? "Loading..." : "Download Dead-Letter Replay CSV"}
@@ -814,6 +1129,14 @@ export function App() {
             <ul>
               {deadLetterJobs.map((job) => (
                 <li key={job.dead_letter_id} className="top-gap">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selectedDeadLetterIds.includes(job.dead_letter_id)}
+                      onChange={() => onToggleDeadLetterSelection(job.dead_letter_id)}
+                    />
+                    Select
+                  </label>{" "}
                   {job.dead_letter_id} • {job.job_type} • {job.user_id} • attempt: {job.attempt}
                   {job.dead_letter_reason ? ` • reason: ${job.dead_letter_reason}` : ""}
                   <div className="stack top-gap">
@@ -829,6 +1152,11 @@ export function App() {
               ))}
             </ul>
           )}
+
+          <p className="subtle">Selected dead-letter jobs: {selectedDeadLetterIds.length}</p>
+          <button type="button" onClick={onReplaySelectedDeadLetters} disabled={adminLoading || selectedDeadLetterIds.length === 0}>
+            {adminLoading ? "Loading..." : "Replay Selected Dead-Letter Jobs"}
+          </button>
 
           {deadLetterReplays.length === 0 ? (
             <p className="subtle">No dead-letter replay audits loaded.</p>

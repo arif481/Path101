@@ -2,6 +2,7 @@ import type {
   BanditAnalyticsResponse,
   AnonymousAuthResponse,
   AuthTokenResponse,
+  DeadLetterBulkReplayResponse,
   DeadLetterJobItem,
   DeadLetterReplayAuditItem,
   DeadLetterReplayResponse,
@@ -210,8 +211,30 @@ export async function triggerSchedulerTick(adminKey: string): Promise<SchedulerT
   return response.json() as Promise<SchedulerTickResponse>;
 }
 
-export async function listDeadLetterJobs(adminKey: string, limit = 50): Promise<DeadLetterJobItem[]> {
-  const response = await fetch(`${BASE_URL}/admin/dead-letter-jobs?limit=${limit}`, {
+export async function listDeadLetterJobs(
+  adminKey: string,
+  options?: {
+    limit?: number;
+    offset?: number;
+    jobType?: string;
+    userId?: string;
+    reason?: string;
+  }
+): Promise<DeadLetterJobItem[]> {
+  const params = new URLSearchParams();
+  params.set("limit", String(options?.limit ?? 50));
+  params.set("offset", String(options?.offset ?? 0));
+  if (options?.jobType) {
+    params.set("job_type", options.jobType);
+  }
+  if (options?.userId) {
+    params.set("user_id", options.userId);
+  }
+  if (options?.reason) {
+    params.set("reason", options.reason);
+  }
+
+  const response = await fetch(`${BASE_URL}/admin/dead-letter-jobs?${params.toString()}`, {
     method: "GET",
     headers: adminHeaders(adminKey),
   });
@@ -239,11 +262,54 @@ export async function replayDeadLetterJob(
   return response.json() as Promise<DeadLetterReplayResponse>;
 }
 
+export async function replayDeadLetterJobsBulk(
+  adminKey: string,
+  deadLetterIds: string[]
+): Promise<DeadLetterBulkReplayResponse> {
+  const response = await fetch(`${BASE_URL}/admin/dead-letter-jobs/replay-bulk`, {
+    method: "POST",
+    headers: {
+      ...adminHeaders(adminKey),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ dead_letter_ids: deadLetterIds }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Dead-letter bulk replay request failed");
+  }
+
+  return response.json() as Promise<DeadLetterBulkReplayResponse>;
+}
+
 export async function listDeadLetterReplays(
   adminKey: string,
-  limit = 50
+  options?: {
+    limit?: number;
+    offset?: number;
+    replayStatus?: string;
+    adminUserId?: string;
+    jobUserId?: string;
+    deadLetterId?: string;
+  }
 ): Promise<DeadLetterReplayAuditItem[]> {
-  const response = await fetch(`${BASE_URL}/admin/dead-letter-replays?limit=${limit}`, {
+  const params = new URLSearchParams();
+  params.set("limit", String(options?.limit ?? 50));
+  params.set("offset", String(options?.offset ?? 0));
+  if (options?.replayStatus) {
+    params.set("replay_status", options.replayStatus);
+  }
+  if (options?.adminUserId) {
+    params.set("admin_user_id", options.adminUserId);
+  }
+  if (options?.jobUserId) {
+    params.set("job_user_id", options.jobUserId);
+  }
+  if (options?.deadLetterId) {
+    params.set("dead_letter_id", options.deadLetterId);
+  }
+
+  const response = await fetch(`${BASE_URL}/admin/dead-letter-replays/filter?${params.toString()}`, {
     method: "GET",
     headers: adminHeaders(adminKey),
   });

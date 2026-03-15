@@ -122,6 +122,15 @@ class DeadLetterReplayResponse(BaseModel):
     dead_letter_id: str
 
 
+class DeadLetterBulkReplayRequest(BaseModel):
+    dead_letter_ids: list[str] = Field(default_factory=list, min_length=1, max_length=100)
+
+
+class DeadLetterBulkReplayResponse(BaseModel):
+    replayed_ids: list[str]
+    failed_ids: list[str]
+
+
 class DeadLetterReplayAuditItem(BaseModel):
     id: int
     dead_letter_id: str
