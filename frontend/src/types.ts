@@ -91,6 +91,16 @@ export type DeadLetterReplayResponse = {
   dead_letter_id: string;
 };
 
+export type DeadLetterReplayAuditItem = {
+  id: number;
+  dead_letter_id: string;
+  job_type: string;
+  job_user_id: string;
+  admin_user_id: string;
+  replay_status: string;
+  replayed_at: string;
+};
+
 export type ResolveReviewStatus = "resolved" | "dismissed";
 
 export type WorkerEventItem = {

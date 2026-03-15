@@ -7,11 +7,12 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models.db_models import BanditLog, Plan, SafetyFlag, SessionRecord
+from app.models.db_models import BanditLog, DeadLetterReplayAudit, Plan, SafetyFlag, SessionRecord, User
 from app.schemas import (
     ActionAnalyticsItem,
     BanditAnalyticsResponse,
     DeadLetterJobItem,
+    DeadLetterReplayAuditItem,
     DeadLetterReplayResponse,
     QueueHealthResponse,
     ResolveFlagRequest,
@@ -21,8 +22,8 @@ from app.schemas import (
     UserAnalyticsResponse,
     WorkerEventItem,
 )
-from app.security import admin_rate_limit
-from app.services.redis_queue import list_dead_letter_jobs, queue_health, replay_dead_letter_job
+from app.security import admin_rate_limit, get_current_admin_user
+from app.services.redis_queue import get_dead_letter_job, list_dead_letter_jobs, queue_health, replay_dead_letter_job
 from app.worker import run_scheduler_tick
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -116,12 +117,93 @@ def admin_dead_letter_jobs(limit: int = 50) -> list[DeadLetterJobItem]:
     response_model=DeadLetterReplayResponse,
     dependencies=[Depends(admin_rate_limit)],
 )
-def admin_replay_dead_letter_job(dead_letter_id: str) -> DeadLetterReplayResponse:
-    ok = replay_dead_letter_job(dead_letter_id)
-    if not ok:
+def admin_replay_dead_letter_job(
+    dead_letter_id: str,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_current_admin_user),
+) -> DeadLetterReplayResponse:
+    existing_job = get_dead_letter_job(dead_letter_id)
+    replayed_job = replay_dead_letter_job(dead_letter_id)
+
+    replay_status = "replayed" if replayed_job is not None else "failed"
+    reference_job = replayed_job or existing_job or {}
+
+    audit_row = DeadLetterReplayAudit(
+        dead_letter_id=dead_letter_id,
+        job_type=str(reference_job.get("job_type") or "unknown"),
+        job_user_id=str(reference_job.get("user_id") or "unknown"),
+        admin_user_id=admin_user.id,
+        replay_status=replay_status,
+        replayed_at=datetime.utcnow(),
+    )
+    db.add(audit_row)
+    db.commit()
+
+    if replayed_job is None:
         raise HTTPException(status_code=404, detail="Dead-letter job not found or replay failed")
 
     return DeadLetterReplayResponse(status="replayed", dead_letter_id=dead_letter_id)
+
+
+@router.get(
+    "/dead-letter-replays",
+    response_model=list[DeadLetterReplayAuditItem],
+    dependencies=[Depends(admin_rate_limit)],
+)
+def admin_dead_letter_replays(limit: int = 50, db: Session = Depends(get_db)) -> list[DeadLetterReplayAuditItem]:
+    safe_limit = max(1, min(limit, 200))
+    statement = select(DeadLetterReplayAudit).order_by(DeadLetterReplayAudit.replayed_at.desc()).limit(safe_limit)
+    rows = db.scalars(statement).all()
+
+    return [
+        DeadLetterReplayAuditItem(
+            id=row.id,
+            dead_letter_id=row.dead_letter_id,
+            job_type=row.job_type,
+            job_user_id=row.job_user_id,
+            admin_user_id=row.admin_user_id,
+            replay_status=row.replay_status,
+            replayed_at=row.replayed_at,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/dead-letter-replays.csv", dependencies=[Depends(admin_rate_limit)])
+def admin_dead_letter_replays_csv(limit: int = 100, db: Session = Depends(get_db)) -> Response:
+    rows = admin_dead_letter_replays(limit=limit, db=db)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "id",
+            "dead_letter_id",
+            "job_type",
+            "job_user_id",
+            "admin_user_id",
+            "replay_status",
+            "replayed_at",
+        ]
+    )
+    for item in rows:
+        writer.writerow(
+            [
+                item.id,
+                item.dead_letter_id,
+                item.job_type,
+                item.job_user_id,
+                item.admin_user_id,
+                item.replay_status,
+                item.replayed_at.isoformat(),
+            ]
+        )
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="path101_dead_letter_replays.csv"'},
+    )
 
 
 @router.get("/worker-events", response_model=list[WorkerEventItem], dependencies=[Depends(admin_rate_limit)])

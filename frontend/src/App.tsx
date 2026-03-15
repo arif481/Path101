@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  downloadDeadLetterReplaysCsv,
   downloadActionAnalyticsCsv,
   downloadUserAnalyticsCsv,
   getActionAnalytics,
@@ -12,6 +13,7 @@ import {
   getAdminQueueHealth,
   listSafetyFlags,
   listDeadLetterJobs,
+  listDeadLetterReplays,
   listWorkerEvents,
   replayDeadLetterJob,
   resolveSafetyFlag,
@@ -20,6 +22,7 @@ import {
 } from "./api";
 import type {
   BanditAnalyticsResponse,
+  DeadLetterReplayAuditItem,
   DeadLetterJobItem,
   AnonymousAuthResponse,
   AuthTokenResponse,
@@ -53,6 +56,7 @@ export function App() {
   const [flags, setFlags] = useState<SafetyFlagItem[]>([]);
   const [queueHealth, setQueueHealth] = useState<QueueHealthResponse | null>(null);
   const [deadLetterJobs, setDeadLetterJobs] = useState<DeadLetterJobItem[]>([]);
+  const [deadLetterReplays, setDeadLetterReplays] = useState<DeadLetterReplayAuditItem[]>([]);
   const [workerEvents, setWorkerEvents] = useState<WorkerEventItem[]>([]);
   const [schedulerTick, setSchedulerTick] = useState<SchedulerTickResponse | null>(null);
   const [analyticsDays, setAnalyticsDays] = useState(30);
@@ -119,11 +123,17 @@ export function App() {
     }
 
     const timer = window.setInterval(() => {
-      void Promise.all([listWorkerEvents(key, 25), getAdminQueueHealth(key), listDeadLetterJobs(key, 25)])
-        .then(([events, health, deadLetters]) => {
+      void Promise.all([
+        listWorkerEvents(key, 25),
+        getAdminQueueHealth(key),
+        listDeadLetterJobs(key, 25),
+        listDeadLetterReplays(key, 25),
+      ])
+        .then(([events, health, deadLetters, replayAudits]) => {
           setWorkerEvents(events);
           setQueueHealth(health);
           setDeadLetterJobs(deadLetters);
+          setDeadLetterReplays(replayAudits);
         })
         .catch(() => {
           setPollMode(false);
@@ -359,6 +369,43 @@ export function App() {
       ]);
       setDeadLetterJobs(jobs);
       setQueueHealth(health);
+      const replayAudits = await listDeadLetterReplays(key, 25);
+      setDeadLetterReplays(replayAudits);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onLoadDeadLetterReplays() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const replayAudits = await listDeadLetterReplays(adminToken.trim(), 25);
+      setDeadLetterReplays(replayAudits);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onDownloadDeadLetterReplaysCsv() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      await downloadDeadLetterReplaysCsv(adminToken.trim(), 100);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
@@ -731,6 +778,14 @@ export function App() {
             {adminLoading ? "Loading..." : "Load Dead-Letter Jobs"}
           </button>
 
+          <button type="button" onClick={onLoadDeadLetterReplays} disabled={adminLoading}>
+            {adminLoading ? "Loading..." : "Load Dead-Letter Replay Audits"}
+          </button>
+
+          <button type="button" onClick={onDownloadDeadLetterReplaysCsv} disabled={adminLoading}>
+            {adminLoading ? "Loading..." : "Download Dead-Letter Replay CSV"}
+          </button>
+
           <button type="button" onClick={onTriggerSchedulerTick} disabled={adminLoading}>
             {adminLoading ? "Loading..." : "Run Scheduler Tick Now"}
           </button>
@@ -770,6 +825,19 @@ export function App() {
                       Replay Dead-Letter Job
                     </button>
                   </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {deadLetterReplays.length === 0 ? (
+            <p className="subtle">No dead-letter replay audits loaded.</p>
+          ) : (
+            <ul>
+              {deadLetterReplays.map((audit) => (
+                <li key={audit.id}>
+                  #{audit.id} • {audit.replay_status} • {audit.dead_letter_id} • {audit.job_type} •
+                  job user: {audit.job_user_id} • admin: {audit.admin_user_id}
                 </li>
               ))}
             </ul>

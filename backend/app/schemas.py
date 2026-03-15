@@ -122,6 +122,16 @@ class DeadLetterReplayResponse(BaseModel):
     dead_letter_id: str
 
 
+class DeadLetterReplayAuditItem(BaseModel):
+    id: int
+    dead_letter_id: str
+    job_type: str
+    job_user_id: str
+    admin_user_id: str
+    replay_status: str
+    replayed_at: datetime
+
+
 class WorkerEventItem(BaseModel):
     id: int
     user_id: str

@@ -106,3 +106,15 @@ class SafetyFlag(Base):
     raw_text_encrypted: Mapped[str] = mapped_column(Text)
     review_status: Mapped[str] = mapped_column(String(32), default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class DeadLetterReplayAudit(Base):
+    __tablename__ = "dead_letter_replay_audits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dead_letter_id: Mapped[str] = mapped_column(String(64), index=True)
+    job_type: Mapped[str] = mapped_column(String(64))
+    job_user_id: Mapped[str] = mapped_column(String(64), index=True)
+    admin_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    replay_status: Mapped[str] = mapped_column(String(32))
+    replayed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)

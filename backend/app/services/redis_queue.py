@@ -113,10 +113,36 @@ def list_dead_letter_jobs(limit: int = 50) -> list[dict[str, Any]]:
     return jobs
 
 
-def replay_dead_letter_job(dead_letter_id: str) -> bool:
+def get_dead_letter_job(dead_letter_id: str) -> dict[str, Any] | None:
     target_id = dead_letter_id.strip()
     if not target_id:
-        return False
+        return None
+
+    try:
+        client = _get_client()
+        raw_items = client.lrange(DEAD_LETTER_KEY, 0, -1)
+    except redis.RedisError:
+        return None
+
+    for raw in raw_items:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+
+        if not isinstance(payload, dict):
+            continue
+
+        if str(payload.get("dead_letter_id", "")) == target_id:
+            return payload
+
+    return None
+
+
+def replay_dead_letter_job(dead_letter_id: str) -> dict[str, Any] | None:
+    target_id = dead_letter_id.strip()
+    if not target_id:
+        return None
 
     try:
         client = _get_client()
@@ -142,14 +168,14 @@ def replay_dead_letter_job(dead_letter_id: str) -> bool:
 
             removed_count = client.lrem(DEAD_LETTER_KEY, 1, raw)
             if int(removed_count) < 1:
-                return False
+                return None
 
             client.rpush(QUEUE_KEY, json.dumps(replay_payload))
-            return True
+            return replay_payload
     except redis.RedisError:
-        return False
+        return None
 
-    return False
+    return None
 
 
 def acquire_nudge_lock(lock_key: str, ttl_seconds: int) -> bool:

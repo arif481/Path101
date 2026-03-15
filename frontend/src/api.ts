@@ -3,6 +3,7 @@ import type {
   AnonymousAuthResponse,
   AuthTokenResponse,
   DeadLetterJobItem,
+  DeadLetterReplayAuditItem,
   DeadLetterReplayResponse,
   IntakeRequest,
   IntakeResponse,
@@ -236,6 +237,36 @@ export async function replayDeadLetterJob(
   }
 
   return response.json() as Promise<DeadLetterReplayResponse>;
+}
+
+export async function listDeadLetterReplays(
+  adminKey: string,
+  limit = 50
+): Promise<DeadLetterReplayAuditItem[]> {
+  const response = await fetch(`${BASE_URL}/admin/dead-letter-replays?limit=${limit}`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Dead-letter replay audit request failed");
+  }
+
+  return response.json() as Promise<DeadLetterReplayAuditItem[]>;
+}
+
+export async function downloadDeadLetterReplaysCsv(adminKey: string, limit = 100): Promise<void> {
+  const response = await fetch(`${BASE_URL}/admin/dead-letter-replays.csv?limit=${limit}`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Dead-letter replay CSV download failed");
+  }
+
+  const blob = await response.blob();
+  triggerCsvDownload(blob, "path101_dead_letter_replays.csv");
 }
 
 export async function getActionAnalytics(
