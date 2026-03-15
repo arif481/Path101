@@ -75,6 +75,26 @@ npm run dev
 
 Open: http://127.0.0.1:5173
 
+## Tests and CI
+
+Backend tests:
+
+```bash
+cd backend
+source .venv/bin/activate
+pytest -q
+```
+
+Frontend checks:
+
+```bash
+cd frontend
+npm run test
+npm run build
+```
+
+GitHub Actions runs both backend and frontend checks on push/PR to `main`.
+
 ## Implemented endpoints
 
 - `POST /auth/anonymous`
