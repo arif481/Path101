@@ -120,3 +120,57 @@ def test_replay_dead_letter_jobs_requeues_and_reports_failures(monkeypatch) -> N
 
     remaining_dead_letters = fake.lrange(redis_queue.DEAD_LETTER_KEY, 0, -1)
     assert remaining_dead_letters == []
+
+
+def test_drop_dead_letter_job_removes_one_item(monkeypatch) -> None:
+    fake = FakeRedis()
+    monkeypatch.setattr(redis_queue, "_get_client", lambda: fake)
+
+    first = {
+        "dead_letter_id": "dead_drop_1",
+        "job_type": "session_completed",
+        "user_id": "user_a",
+    }
+    second = {
+        "dead_letter_id": "dead_drop_2",
+        "job_type": "session_nudge",
+        "user_id": "user_b",
+    }
+
+    fake.rpush(redis_queue.DEAD_LETTER_KEY, json.dumps(first))
+    fake.rpush(redis_queue.DEAD_LETTER_KEY, json.dumps(second))
+
+    dropped = redis_queue.drop_dead_letter_job("dead_drop_1")
+    assert dropped is not None
+    assert dropped.get("dead_letter_id") == "dead_drop_1"
+
+    remaining_ids = [json.loads(item).get("dead_letter_id") for item in fake.lrange(redis_queue.DEAD_LETTER_KEY, 0, -1)]
+    assert remaining_ids == ["dead_drop_2"]
+
+
+def test_drop_dead_letter_jobs_reports_failures(monkeypatch) -> None:
+    fake = FakeRedis()
+    monkeypatch.setattr(redis_queue, "_get_client", lambda: fake)
+
+    first = {
+        "dead_letter_id": "dead_bulk_1",
+        "job_type": "session_completed",
+        "user_id": "user_a",
+    }
+    second = {
+        "dead_letter_id": "dead_bulk_2",
+        "job_type": "session_nudge",
+        "user_id": "user_b",
+    }
+
+    fake.rpush(redis_queue.DEAD_LETTER_KEY, json.dumps(first))
+    fake.rpush(redis_queue.DEAD_LETTER_KEY, json.dumps(second))
+
+    dropped_ids, failed_ids, dropped_payloads = redis_queue.drop_dead_letter_jobs(
+        ["dead_bulk_1", "missing", "dead_bulk_2"]
+    )
+
+    assert dropped_ids == ["dead_bulk_1", "dead_bulk_2"]
+    assert failed_ids == ["missing"]
+    assert set(dropped_payloads.keys()) == {"dead_bulk_1", "dead_bulk_2"}
+    assert fake.lrange(redis_queue.DEAD_LETTER_KEY, 0, -1) == []

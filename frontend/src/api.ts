@@ -2,7 +2,9 @@ import type {
   BanditAnalyticsResponse,
   AnonymousAuthResponse,
   AuthTokenResponse,
+  DeadLetterBulkDropResponse,
   DeadLetterBulkReplayResponse,
+  DeadLetterDropResponse,
   DeadLetterJobItem,
   DeadLetterReplayAuditItem,
   DeadLetterReplayResponse,
@@ -280,6 +282,42 @@ export async function replayDeadLetterJobsBulk(
   }
 
   return response.json() as Promise<DeadLetterBulkReplayResponse>;
+}
+
+export async function dropDeadLetterJob(
+  adminKey: string,
+  deadLetterId: string
+): Promise<DeadLetterDropResponse> {
+  const response = await fetch(`${BASE_URL}/admin/dead-letter-jobs/${deadLetterId}/drop`, {
+    method: "POST",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Dead-letter drop request failed");
+  }
+
+  return response.json() as Promise<DeadLetterDropResponse>;
+}
+
+export async function dropDeadLetterJobsBulk(
+  adminKey: string,
+  deadLetterIds: string[]
+): Promise<DeadLetterBulkDropResponse> {
+  const response = await fetch(`${BASE_URL}/admin/dead-letter-jobs/drop-bulk`, {
+    method: "POST",
+    headers: {
+      ...adminHeaders(adminKey),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ dead_letter_ids: deadLetterIds }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Dead-letter bulk drop request failed");
+  }
+
+  return response.json() as Promise<DeadLetterBulkDropResponse>;
 }
 
 export async function listDeadLetterReplays(

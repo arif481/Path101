@@ -131,6 +131,20 @@ class DeadLetterBulkReplayResponse(BaseModel):
     failed_ids: list[str]
 
 
+class DeadLetterDropResponse(BaseModel):
+    status: Literal["dropped"]
+    dead_letter_id: str
+
+
+class DeadLetterBulkDropRequest(BaseModel):
+    dead_letter_ids: list[str] = Field(default_factory=list, min_length=1, max_length=100)
+
+
+class DeadLetterBulkDropResponse(BaseModel):
+    dropped_ids: list[str]
+    failed_ids: list[str]
+
+
 class DeadLetterReplayAuditItem(BaseModel):
     id: int
     dead_letter_id: str

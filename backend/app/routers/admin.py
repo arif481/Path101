@@ -10,9 +10,12 @@ from app.db import get_db
 from app.models.db_models import BanditLog, DeadLetterReplayAudit, Plan, SafetyFlag, SessionRecord, User
 from app.schemas import (
     ActionAnalyticsItem,
+    DeadLetterBulkDropRequest,
+    DeadLetterBulkDropResponse,
     BanditAnalyticsResponse,
     DeadLetterBulkReplayRequest,
     DeadLetterBulkReplayResponse,
+    DeadLetterDropResponse,
     DeadLetterJobItem,
     DeadLetterReplayAuditItem,
     DeadLetterReplayResponse,
@@ -26,6 +29,8 @@ from app.schemas import (
 )
 from app.security import admin_rate_limit, get_current_admin_user
 from app.services.redis_queue import (
+    drop_dead_letter_job,
+    drop_dead_letter_jobs,
     get_dead_letter_job,
     list_dead_letter_jobs,
     queue_health,
@@ -180,6 +185,78 @@ def admin_replay_dead_letter_job(
         raise HTTPException(status_code=404, detail="Dead-letter job not found or replay failed")
 
     return DeadLetterReplayResponse(status="replayed", dead_letter_id=dead_letter_id)
+
+
+@router.post(
+    "/dead-letter-jobs/{dead_letter_id}/drop",
+    response_model=DeadLetterDropResponse,
+    dependencies=[Depends(admin_rate_limit)],
+)
+def admin_drop_dead_letter_job(
+    dead_letter_id: str,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_current_admin_user),
+) -> DeadLetterDropResponse:
+    dropped_job = drop_dead_letter_job(dead_letter_id)
+    if dropped_job is None:
+        _record_dead_letter_replay_audit(
+            db,
+            dead_letter_id=dead_letter_id,
+            job={"job_type": "unknown", "user_id": "unknown"},
+            admin_user_id=admin_user.id,
+            replay_status="drop_failed",
+        )
+        db.commit()
+        raise HTTPException(status_code=404, detail="Dead-letter job not found or drop failed")
+
+    _record_dead_letter_replay_audit(
+        db,
+        dead_letter_id=dead_letter_id,
+        job=dropped_job,
+        admin_user_id=admin_user.id,
+        replay_status="dropped",
+    )
+    db.commit()
+    return DeadLetterDropResponse(status="dropped", dead_letter_id=dead_letter_id)
+
+
+@router.post(
+    "/dead-letter-jobs/drop-bulk",
+    response_model=DeadLetterBulkDropResponse,
+    dependencies=[Depends(admin_rate_limit)],
+)
+def admin_drop_dead_letter_jobs_bulk(
+    payload: DeadLetterBulkDropRequest,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_current_admin_user),
+) -> DeadLetterBulkDropResponse:
+    normalized_ids = [value.strip() for value in payload.dead_letter_ids if value.strip()]
+    if not normalized_ids:
+        raise HTTPException(status_code=400, detail="No valid dead_letter_ids provided")
+
+    seen_ids = set()
+    unique_ids = []
+    for dead_letter_id in normalized_ids:
+        if dead_letter_id in seen_ids:
+            continue
+        seen_ids.add(dead_letter_id)
+        unique_ids.append(dead_letter_id)
+
+    dropped_ids, failed_ids, dropped_payloads = drop_dead_letter_jobs(unique_ids)
+    dropped_set = set(dropped_ids)
+    for dead_letter_id in unique_ids:
+        status = "dropped" if dead_letter_id in dropped_set else "drop_failed"
+        reference_job = dropped_payloads.get(dead_letter_id, {"job_type": "unknown", "user_id": "unknown"})
+        _record_dead_letter_replay_audit(
+            db,
+            dead_letter_id=dead_letter_id,
+            job=reference_job,
+            admin_user_id=admin_user.id,
+            replay_status=status,
+        )
+
+    db.commit()
+    return DeadLetterBulkDropResponse(dropped_ids=dropped_ids, failed_ids=failed_ids)
 
 
 @router.post(

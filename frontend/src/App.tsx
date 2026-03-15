@@ -3,6 +3,8 @@ import {
   downloadDeadLetterReplaysCsv,
   downloadActionAnalyticsCsv,
   downloadUserAnalyticsCsv,
+  dropDeadLetterJob,
+  dropDeadLetterJobsBulk,
   getActionAnalytics,
   getUserAnalytics,
   authAnonymous,
@@ -466,6 +468,64 @@ export function App() {
 
       if (result.failed_ids.length > 0) {
         setError(`Some replay operations failed: ${result.failed_ids.join(", ")}`);
+      }
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onDropDeadLetter(deadLetterId: string) {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    const key = adminToken.trim();
+    setAdminLoading(true);
+    setError(null);
+    try {
+      await dropDeadLetterJob(key, deadLetterId);
+      const [health] = await Promise.all([
+        getAdminQueueHealth(key),
+        loadDeadLetterJobsForAdmin(key),
+        loadDeadLetterReplaysForAdmin(key),
+      ]);
+      setQueueHealth(health);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onDropSelectedDeadLetters() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    if (selectedDeadLetterIds.length === 0) {
+      setError("Select at least one dead-letter job.");
+      return;
+    }
+
+    const key = adminToken.trim();
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const result = await dropDeadLetterJobsBulk(key, selectedDeadLetterIds);
+      setSelectedDeadLetterIds([]);
+      const [health] = await Promise.all([
+        getAdminQueueHealth(key),
+        loadDeadLetterJobsForAdmin(key),
+        loadDeadLetterReplaysForAdmin(key),
+      ]);
+      setQueueHealth(health);
+
+      if (result.failed_ids.length > 0) {
+        setError(`Some drop operations failed: ${result.failed_ids.join(", ")}`);
       }
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
@@ -1147,6 +1207,13 @@ export function App() {
                     >
                       Replay Dead-Letter Job
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => onDropDeadLetter(job.dead_letter_id)}
+                      disabled={adminLoading}
+                    >
+                      Drop Dead-Letter Job
+                    </button>
                   </div>
                 </li>
               ))}
@@ -1156,6 +1223,9 @@ export function App() {
           <p className="subtle">Selected dead-letter jobs: {selectedDeadLetterIds.length}</p>
           <button type="button" onClick={onReplaySelectedDeadLetters} disabled={adminLoading || selectedDeadLetterIds.length === 0}>
             {adminLoading ? "Loading..." : "Replay Selected Dead-Letter Jobs"}
+          </button>
+          <button type="button" onClick={onDropSelectedDeadLetters} disabled={adminLoading || selectedDeadLetterIds.length === 0}>
+            {adminLoading ? "Loading..." : "Drop Selected Dead-Letter Jobs"}
           </button>
 
           {deadLetterReplays.length === 0 ? (

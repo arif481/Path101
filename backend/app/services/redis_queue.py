@@ -181,6 +181,57 @@ def replay_dead_letter_jobs(dead_letter_ids: list[str]) -> tuple[list[str], list
     return replayed_ids, failed_ids
 
 
+def drop_dead_letter_job(dead_letter_id: str) -> dict[str, Any] | None:
+    target_id = dead_letter_id.strip()
+    if not target_id:
+        return None
+
+    try:
+        client = _get_client()
+        raw_items = client.lrange(DEAD_LETTER_KEY, 0, -1)
+        for raw in raw_items:
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+
+            if not isinstance(payload, dict):
+                continue
+
+            if str(payload.get("dead_letter_id", "")) != target_id:
+                continue
+
+            removed_count = client.lrem(DEAD_LETTER_KEY, 1, raw)
+            if int(removed_count) < 1:
+                return None
+
+            return payload
+    except redis.RedisError:
+        return None
+
+    return None
+
+
+def drop_dead_letter_jobs(dead_letter_ids: list[str]) -> tuple[list[str], list[str], dict[str, dict[str, Any]]]:
+    dropped_ids: list[str] = []
+    failed_ids: list[str] = []
+    dropped_payloads: dict[str, dict[str, Any]] = {}
+
+    for dead_letter_id in dead_letter_ids:
+        normalized_id = dead_letter_id.strip()
+        if not normalized_id:
+            continue
+
+        dropped_payload = drop_dead_letter_job(normalized_id)
+        if dropped_payload is None:
+            failed_ids.append(normalized_id)
+        else:
+            dropped_ids.append(normalized_id)
+            dropped_payloads[normalized_id] = dropped_payload
+
+    return dropped_ids, failed_ids, dropped_payloads
+
+
 def replay_dead_letter_job(dead_letter_id: str) -> dict[str, Any] | None:
     target_id = dead_letter_id.strip()
     if not target_id:

@@ -96,6 +96,16 @@ export type DeadLetterBulkReplayResponse = {
   failed_ids: string[];
 };
 
+export type DeadLetterDropResponse = {
+  status: "dropped";
+  dead_letter_id: string;
+};
+
+export type DeadLetterBulkDropResponse = {
+  dropped_ids: string[];
+  failed_ids: string[];
+};
+
 export type DeadLetterReplayAuditItem = {
   id: number;
   dead_letter_id: string;
