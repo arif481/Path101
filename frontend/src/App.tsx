@@ -11,13 +11,16 @@ import {
   completeSession,
   getAdminQueueHealth,
   listSafetyFlags,
+  listDeadLetterJobs,
   listWorkerEvents,
+  replayDeadLetterJob,
   resolveSafetyFlag,
   submitIntake,
   triggerSchedulerTick,
 } from "./api";
 import type {
   BanditAnalyticsResponse,
+  DeadLetterJobItem,
   AnonymousAuthResponse,
   AuthTokenResponse,
   IntakeResponse,
@@ -49,6 +52,7 @@ export function App() {
   const [adminToken, setAdminToken] = useState("");
   const [flags, setFlags] = useState<SafetyFlagItem[]>([]);
   const [queueHealth, setQueueHealth] = useState<QueueHealthResponse | null>(null);
+  const [deadLetterJobs, setDeadLetterJobs] = useState<DeadLetterJobItem[]>([]);
   const [workerEvents, setWorkerEvents] = useState<WorkerEventItem[]>([]);
   const [schedulerTick, setSchedulerTick] = useState<SchedulerTickResponse | null>(null);
   const [analyticsDays, setAnalyticsDays] = useState(30);
@@ -115,10 +119,11 @@ export function App() {
     }
 
     const timer = window.setInterval(() => {
-      void Promise.all([listWorkerEvents(key, 25), getAdminQueueHealth(key)])
-        .then(([events, health]) => {
+      void Promise.all([listWorkerEvents(key, 25), getAdminQueueHealth(key), listDeadLetterJobs(key, 25)])
+        .then(([events, health, deadLetters]) => {
           setWorkerEvents(events);
           setQueueHealth(health);
+          setDeadLetterJobs(deadLetters);
         })
         .catch(() => {
           setPollMode(false);
@@ -312,6 +317,48 @@ export function App() {
     try {
       const events = await listWorkerEvents(adminToken.trim(), 25);
       setWorkerEvents(events);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onLoadDeadLetterJobs() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const jobs = await listDeadLetterJobs(adminToken.trim(), 25);
+      setDeadLetterJobs(jobs);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onReplayDeadLetter(deadLetterId: string) {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    const key = adminToken.trim()
+    setAdminLoading(true);
+    setError(null);
+    try {
+      await replayDeadLetterJob(key, deadLetterId);
+      const [jobs, health] = await Promise.all([
+        listDeadLetterJobs(key, 25),
+        getAdminQueueHealth(key),
+      ]);
+      setDeadLetterJobs(jobs);
+      setQueueHealth(health);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
@@ -629,7 +676,7 @@ export function App() {
             </button>
             {queueHealth && (
               <p>
-                Queue: {queueHealth.connected ? "connected" : "disconnected"} • Pending jobs: {queueHealth.queue_size}
+                Queue: {queueHealth.connected ? "connected" : "disconnected"} • Pending jobs: {queueHealth.queue_size} • Dead-letter jobs: {queueHealth.dead_letter_size}
               </p>
             )}
           </div>
@@ -680,6 +727,10 @@ export function App() {
             {adminLoading ? "Loading..." : "Load Worker Activity"}
           </button>
 
+          <button type="button" onClick={onLoadDeadLetterJobs} disabled={adminLoading}>
+            {adminLoading ? "Loading..." : "Load Dead-Letter Jobs"}
+          </button>
+
           <button type="button" onClick={onTriggerSchedulerTick} disabled={adminLoading}>
             {adminLoading ? "Loading..." : "Run Scheduler Tick Now"}
           </button>
@@ -697,6 +748,28 @@ export function App() {
               {workerEvents.map((event) => (
                 <li key={event.id}>
                   #{event.id} • {event.source} • {event.action_id} • {event.user_id} • reward: {event.reward}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {deadLetterJobs.length === 0 ? (
+            <p className="subtle">No dead-letter jobs loaded.</p>
+          ) : (
+            <ul>
+              {deadLetterJobs.map((job) => (
+                <li key={job.dead_letter_id} className="top-gap">
+                  {job.dead_letter_id} • {job.job_type} • {job.user_id} • attempt: {job.attempt}
+                  {job.dead_letter_reason ? ` • reason: ${job.dead_letter_reason}` : ""}
+                  <div className="stack top-gap">
+                    <button
+                      type="button"
+                      onClick={() => onReplayDeadLetter(job.dead_letter_id)}
+                      disabled={adminLoading}
+                    >
+                      Replay Dead-Letter Job
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>

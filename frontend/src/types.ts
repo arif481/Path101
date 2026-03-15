@@ -76,6 +76,21 @@ export type QueueHealthResponse = {
   dead_letter_size: number;
 };
 
+export type DeadLetterJobItem = {
+  dead_letter_id: string;
+  job_type: string;
+  user_id: string;
+  attempt: number;
+  dead_letter_reason: string | null;
+  dead_lettered_at: string | null;
+  created_at: string | null;
+};
+
+export type DeadLetterReplayResponse = {
+  status: "replayed";
+  dead_letter_id: string;
+};
+
 export type ResolveReviewStatus = "resolved" | "dismissed";
 
 export type WorkerEventItem = {

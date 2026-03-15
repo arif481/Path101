@@ -11,6 +11,8 @@ from app.models.db_models import BanditLog, Plan, SafetyFlag, SessionRecord
 from app.schemas import (
     ActionAnalyticsItem,
     BanditAnalyticsResponse,
+    DeadLetterJobItem,
+    DeadLetterReplayResponse,
     QueueHealthResponse,
     ResolveFlagRequest,
     SafetyFlagItem,
@@ -20,10 +22,24 @@ from app.schemas import (
     WorkerEventItem,
 )
 from app.security import admin_rate_limit
-from app.services.redis_queue import queue_health
+from app.services.redis_queue import list_dead_letter_jobs, queue_health, replay_dead_letter_job
 from app.worker import run_scheduler_tick
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _parse_iso_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
 
 
 @router.get("/flags", response_model=list[SafetyFlagItem], dependencies=[Depends(admin_rate_limit)])
@@ -64,6 +80,48 @@ def resolve_flag(flag_id: int, payload: ResolveFlagRequest, db: Session = Depend
 def admin_queue_health() -> QueueHealthResponse:
     health = queue_health()
     return QueueHealthResponse(**health)
+
+
+@router.get("/dead-letter-jobs", response_model=list[DeadLetterJobItem], dependencies=[Depends(admin_rate_limit)])
+def admin_dead_letter_jobs(limit: int = 50) -> list[DeadLetterJobItem]:
+    jobs = list_dead_letter_jobs(limit=limit)
+    response: list[DeadLetterJobItem] = []
+
+    for item in jobs:
+        dead_letter_id = str(item.get("dead_letter_id", "")).strip()
+        job_type = str(item.get("job_type", "")).strip()
+        user_id = str(item.get("user_id", "")).strip()
+        if not dead_letter_id or not job_type or not user_id:
+            continue
+
+        response.append(
+            DeadLetterJobItem(
+                dead_letter_id=dead_letter_id,
+                job_type=job_type,
+                user_id=user_id,
+                attempt=int(item.get("attempt", 0) or 0),
+                dead_letter_reason=(
+                    str(item.get("dead_letter_reason")) if item.get("dead_letter_reason") else None
+                ),
+                dead_lettered_at=_parse_iso_datetime(item.get("dead_lettered_at")),
+                created_at=_parse_iso_datetime(item.get("created_at")),
+            )
+        )
+
+    return response
+
+
+@router.post(
+    "/dead-letter-jobs/{dead_letter_id}/replay",
+    response_model=DeadLetterReplayResponse,
+    dependencies=[Depends(admin_rate_limit)],
+)
+def admin_replay_dead_letter_job(dead_letter_id: str) -> DeadLetterReplayResponse:
+    ok = replay_dead_letter_job(dead_letter_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Dead-letter job not found or replay failed")
+
+    return DeadLetterReplayResponse(status="replayed", dead_letter_id=dead_letter_id)
 
 
 @router.get("/worker-events", response_model=list[WorkerEventItem], dependencies=[Depends(admin_rate_limit)])

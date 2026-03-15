@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -79,6 +80,7 @@ def requeue_session_job(job: dict[str, Any], reason: str) -> bool:
 
 def enqueue_dead_letter(job: dict[str, Any], reason: str) -> bool:
     dead_letter_job = dict(job)
+    dead_letter_job.setdefault("dead_letter_id", str(uuid.uuid4()))
     dead_letter_job["dead_letter_reason"] = reason
     dead_letter_job["dead_lettered_at"] = datetime.utcnow().isoformat()
 
@@ -88,6 +90,66 @@ def enqueue_dead_letter(job: dict[str, Any], reason: str) -> bool:
         return True
     except redis.RedisError:
         return False
+
+
+def list_dead_letter_jobs(limit: int = 50) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(limit, 200))
+    try:
+        client = _get_client()
+        raw_items = client.lrange(DEAD_LETTER_KEY, -safe_limit, -1)
+    except redis.RedisError:
+        return []
+
+    jobs: list[dict[str, Any]] = []
+    for raw in reversed(raw_items):
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+
+        if isinstance(payload, dict):
+            jobs.append(payload)
+
+    return jobs
+
+
+def replay_dead_letter_job(dead_letter_id: str) -> bool:
+    target_id = dead_letter_id.strip()
+    if not target_id:
+        return False
+
+    try:
+        client = _get_client()
+        raw_items = client.lrange(DEAD_LETTER_KEY, 0, -1)
+        for raw in raw_items:
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+
+            if not isinstance(payload, dict):
+                continue
+
+            if str(payload.get("dead_letter_id", "")) != target_id:
+                continue
+
+            replay_payload = dict(payload)
+            replay_payload.pop("dead_letter_reason", None)
+            replay_payload.pop("dead_lettered_at", None)
+            replay_payload["attempt"] = 0
+            replay_payload["last_error"] = ""
+            replay_payload["last_failed_at"] = ""
+
+            removed_count = client.lrem(DEAD_LETTER_KEY, 1, raw)
+            if int(removed_count) < 1:
+                return False
+
+            client.rpush(QUEUE_KEY, json.dumps(replay_payload))
+            return True
+    except redis.RedisError:
+        return False
+
+    return False
 
 
 def acquire_nudge_lock(lock_key: str, ttl_seconds: int) -> bool:

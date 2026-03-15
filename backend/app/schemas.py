@@ -107,6 +107,21 @@ class QueueHealthResponse(BaseModel):
     dead_letter_size: int
 
 
+class DeadLetterJobItem(BaseModel):
+    dead_letter_id: str
+    job_type: str
+    user_id: str
+    attempt: int
+    dead_letter_reason: str | None = None
+    dead_lettered_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class DeadLetterReplayResponse(BaseModel):
+    status: Literal["replayed"]
+    dead_letter_id: str
+
+
 class WorkerEventItem(BaseModel):
     id: int
     user_id: str

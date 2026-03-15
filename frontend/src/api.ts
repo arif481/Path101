@@ -2,6 +2,8 @@ import type {
   BanditAnalyticsResponse,
   AnonymousAuthResponse,
   AuthTokenResponse,
+  DeadLetterJobItem,
+  DeadLetterReplayResponse,
   IntakeRequest,
   IntakeResponse,
   MeResponse,
@@ -205,6 +207,35 @@ export async function triggerSchedulerTick(adminKey: string): Promise<SchedulerT
   }
 
   return response.json() as Promise<SchedulerTickResponse>;
+}
+
+export async function listDeadLetterJobs(adminKey: string, limit = 50): Promise<DeadLetterJobItem[]> {
+  const response = await fetch(`${BASE_URL}/admin/dead-letter-jobs?limit=${limit}`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Dead-letter jobs request failed");
+  }
+
+  return response.json() as Promise<DeadLetterJobItem[]>;
+}
+
+export async function replayDeadLetterJob(
+  adminKey: string,
+  deadLetterId: string
+): Promise<DeadLetterReplayResponse> {
+  const response = await fetch(`${BASE_URL}/admin/dead-letter-jobs/${deadLetterId}/replay`, {
+    method: "POST",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Dead-letter replay request failed");
+  }
+
+  return response.json() as Promise<DeadLetterReplayResponse>;
 }
 
 export async function getActionAnalytics(
