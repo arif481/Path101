@@ -73,6 +73,7 @@ export type SafetyFlagItem = {
 export type QueueHealthResponse = {
   connected: boolean;
   queue_size: number;
+  dead_letter_size: number;
 };
 
 export type ResolveReviewStatus = "resolved" | "dismissed";

@@ -53,6 +53,8 @@ services:
         value: "0.2"
       - key: BANDIT_MIN_HISTORY
         value: "3"
+      - key: WORKER_MAX_RETRIES
+        value: "3"
       - key: JWT_SECRET
         sync: false
       - key: ADMIN_EMAIL_ALLOWLIST

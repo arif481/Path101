@@ -61,8 +61,10 @@ Worker scheduler settings (optional):
 - `BANDIT_MIN_HISTORY` (default `3`)
 - `AUTH_RATE_LIMIT_COUNT` / `AUTH_RATE_LIMIT_WINDOW_SECONDS`
 - `ADMIN_RATE_LIMIT_COUNT` / `ADMIN_RATE_LIMIT_WINDOW_SECONDS`
+- `WORKER_MAX_RETRIES` (default `3`)
 
 The worker scans for incomplete sessions scheduled in the configured window and enqueues `session_nudge` jobs with Redis dedupe locks.
+Failed worker jobs are retried up to `WORKER_MAX_RETRIES` and then moved to a Redis dead-letter queue.
 Session completion recommendations use an epsilon-greedy bandit policy (`recovery_10`, `focus_15`, `deep_20`) with cold-start exploration and feedback guardrails.
 
 ### 2) Frontend
@@ -168,3 +170,4 @@ For `path101-web`:
 - Use Alembic migrations (`alembic upgrade head`) for schema changes in all managed environments.
 - `AUTO_MIGRATE` is opt-in and defaults to `false`; leave it disabled in production.
 - CORS and trusted hosts are environment-driven (`CORS_ORIGINS`, `TRUSTED_HOSTS`).
+- Request rate limiting is Redis-backed when `REDIS_URL` is available, with in-memory fallback for local resilience.

@@ -13,10 +13,17 @@ from app.config import (
     NUDGE_LOOKAHEAD_MINUTES,
     NUDGE_LOOKBACK_HOURS,
     SCHEDULER_INTERVAL_SECONDS,
+    WORKER_MAX_RETRIES,
 )
 from app.db import SessionLocal
 from app.models.db_models import BanditLog, SessionRecord
-from app.services.redis_queue import acquire_nudge_lock, dequeue_session_job, enqueue_session_job
+from app.services.redis_queue import (
+    acquire_nudge_lock,
+    dequeue_session_job,
+    enqueue_dead_letter,
+    enqueue_session_job,
+    requeue_session_job,
+)
 
 logger = logging.getLogger("path101.worker")
 
@@ -166,6 +173,29 @@ def run_worker(poll_sleep_seconds: float = 1.0) -> None:
 
         ok = process_job(job)
         if not ok:
+            current_attempt = int(job.get("attempt", 0))
+            if current_attempt < max(WORKER_MAX_RETRIES, 0):
+                requeued = requeue_session_job(job, reason="job_processing_failed")
+                if requeued:
+                    logger.warning(
+                        "Requeued failed job type=%s user_id=%s attempt=%s",
+                        job.get("job_type"),
+                        job.get("user_id"),
+                        current_attempt + 1,
+                    )
+                else:
+                    logger.error("Failed to requeue job after processing failure")
+            else:
+                dead_lettered = enqueue_dead_letter(job, reason="max_retries_exceeded")
+                if dead_lettered:
+                    logger.error(
+                        "Dead-lettered job type=%s user_id=%s attempt=%s",
+                        job.get("job_type"),
+                        job.get("user_id"),
+                        current_attempt,
+                    )
+                else:
+                    logger.error("Failed to dead-letter job after max retries")
             time.sleep(poll_sleep_seconds)
 
     logger.info("Worker stopped")

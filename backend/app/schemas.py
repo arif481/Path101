@@ -104,6 +104,7 @@ class ResolveFlagRequest(BaseModel):
 class QueueHealthResponse(BaseModel):
     connected: bool
     queue_size: int
+    dead_letter_size: int
 
 
 class WorkerEventItem(BaseModel):

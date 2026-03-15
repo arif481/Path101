@@ -54,6 +54,7 @@ class Settings:
     auth_rate_limit_window_seconds: int
     admin_rate_limit_count: int
     admin_rate_limit_window_seconds: int
+    worker_max_retries: int
 
 
 SETTINGS = Settings(
@@ -83,6 +84,7 @@ SETTINGS = Settings(
     auth_rate_limit_window_seconds=int(os.getenv("AUTH_RATE_LIMIT_WINDOW_SECONDS", "60")),
     admin_rate_limit_count=int(os.getenv("ADMIN_RATE_LIMIT_COUNT", "120")),
     admin_rate_limit_window_seconds=int(os.getenv("ADMIN_RATE_LIMIT_WINDOW_SECONDS", "60")),
+    worker_max_retries=int(os.getenv("WORKER_MAX_RETRIES", "3")),
 )
 
 
@@ -123,3 +125,4 @@ AUTH_RATE_LIMIT_COUNT = SETTINGS.auth_rate_limit_count
 AUTH_RATE_LIMIT_WINDOW_SECONDS = SETTINGS.auth_rate_limit_window_seconds
 ADMIN_RATE_LIMIT_COUNT = SETTINGS.admin_rate_limit_count
 ADMIN_RATE_LIMIT_WINDOW_SECONDS = SETTINGS.admin_rate_limit_window_seconds
+WORKER_MAX_RETRIES = SETTINGS.worker_max_retries
