@@ -14,6 +14,7 @@ import type {
   IntakeResponse,
   MeResponse,
   NotificationLogItem,
+  NotificationAnalyticsResponse,
   NotificationSendResponse,
   QueueHealthResponse,
   ResolveReviewStatus,
@@ -210,6 +211,36 @@ export async function sendTestNotification(
   }
 
   return response.json() as Promise<NotificationSendResponse>;
+}
+
+export async function getNotificationAnalytics(
+  adminKey: string,
+  days = 30
+): Promise<NotificationAnalyticsResponse> {
+  const response = await fetch(`${BASE_URL}/admin/notifications/analytics?days=${days}`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Notification analytics request failed");
+  }
+
+  return response.json() as Promise<NotificationAnalyticsResponse>;
+}
+
+export async function downloadNotificationAnalyticsCsv(adminKey: string, days = 30): Promise<void> {
+  const response = await fetch(`${BASE_URL}/admin/notifications/analytics.csv?days=${days}`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Notification analytics CSV download failed");
+  }
+
+  const blob = await response.blob();
+  triggerCsvDownload(blob, `path101_notification_analytics_${days}d.csv`);
 }
 
 export async function listSafetyFlags(

@@ -114,6 +114,7 @@ GitHub Actions runs both backend and frontend checks on push/PR to `main`.
 - `GET /admin/queue-health` (requires admin Bearer token)
 - `GET /admin/notifications` (requires admin Bearer token)
 - `POST /admin/notifications/test-send` (requires admin Bearer token)
+- `GET /admin/notifications/analytics` and `GET /admin/notifications/analytics.csv` (requires admin Bearer token)
 - `GET /admin/dead-letter-jobs` (requires admin Bearer token)
 - `POST /admin/dead-letter-jobs/{dead_letter_id}/replay` (requires admin Bearer token)
 - `POST /admin/dead-letter-jobs/{dead_letter_id}/drop` (requires admin Bearer token)
@@ -131,7 +132,7 @@ GitHub Actions runs both backend and frontend checks on push/PR to `main`.
 - Current storage is SQLAlchemy-backed (`sqlite` by default, PostgreSQL-ready via `DATABASE_URL`).
 - Crisis-like language triggers triage messaging and safety flag behavior stub.
 - Safety triage now includes severity scoring with escalation statuses (`none`, `watch`, `escalated`, `urgent`) and admin review lifecycle fields.
-- Next step is deeper analytics dashboards and notification delivery channels.
+- Notification analytics now includes delivery-rate, channel, source, and status breakdowns with CSV export.
 
 ## Deploy (Render blueprint)
 

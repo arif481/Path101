@@ -226,6 +226,30 @@ class NotificationSendResponse(BaseModel):
     status: str
 
 
+class NotificationAnalyticsBucket(BaseModel):
+    key: str
+    count: int
+
+
+class NotificationChannelAnalyticsItem(BaseModel):
+    channel: str
+    total: int
+    delivered: int
+    failed: int
+    delivery_rate: float
+
+
+class NotificationAnalyticsResponse(BaseModel):
+    days: int
+    total_events: int
+    delivered: int
+    failed: int
+    delivery_rate: float
+    by_status: list[NotificationAnalyticsBucket]
+    by_source: list[NotificationAnalyticsBucket]
+    by_channel: list[NotificationChannelAnalyticsItem]
+
+
 class WorkerEventItem(BaseModel):
     id: int
     user_id: str

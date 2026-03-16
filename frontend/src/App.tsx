@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  downloadNotificationAnalyticsCsv,
   downloadDeadLetterReplaysCsv,
   downloadActionAnalyticsCsv,
   downloadUserAnalyticsCsv,
@@ -15,6 +16,7 @@ import {
   authRegister,
   completeSession,
   getAdminQueueHealth,
+  getNotificationAnalytics,
   listSafetyFlags,
   listDeadLetterJobs,
   listDeadLetterReplays,
@@ -35,6 +37,7 @@ import type {
   DeadLetterJobItem,
   DeadLetterSummaryResponse,
   NotificationLogItem,
+  NotificationAnalyticsResponse,
   AnonymousAuthResponse,
   AuthTokenResponse,
   IntakeResponse,
@@ -74,6 +77,7 @@ export function App() {
   const [purgeOlderThanDays, setPurgeOlderThanDays] = useState(30);
   const [purgeLimit, setPurgeLimit] = useState(500);
   const [notificationLogs, setNotificationLogs] = useState<NotificationLogItem[]>([]);
+  const [notificationAnalytics, setNotificationAnalytics] = useState<NotificationAnalyticsResponse | null>(null);
   const [notificationOffset, setNotificationOffset] = useState(0);
   const [notificationUserFilter, setNotificationUserFilter] = useState("");
   const [notificationChannelFilter, setNotificationChannelFilter] = useState("");
@@ -751,6 +755,43 @@ export function App() {
       });
       await loadNotificationLogsForAdmin(key);
       await onLoadQueueHealth();
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onLoadNotificationAnalytics() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    const key = adminToken.trim();
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const analytics = await getNotificationAnalytics(key, analyticsDays);
+      setNotificationAnalytics(analytics);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onDownloadNotificationAnalyticsCsv() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    const key = adminToken.trim();
+    setAdminLoading(true);
+    setError(null);
+    try {
+      await downloadNotificationAnalyticsCsv(key, analyticsDays);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
@@ -1749,13 +1790,66 @@ export function App() {
             <button type="button" onClick={onLoadUserAnalytics} disabled={adminLoading}>
               {adminLoading ? "Loading..." : "Load User Analytics"}
             </button>
+            <button type="button" onClick={onLoadNotificationAnalytics} disabled={adminLoading}>
+              {adminLoading ? "Loading..." : "Load Notification Analytics"}
+            </button>
             <button type="button" onClick={onDownloadActionAnalyticsCsv} disabled={adminLoading}>
               {adminLoading ? "Loading..." : "Download Action CSV"}
             </button>
             <button type="button" onClick={onDownloadUserAnalyticsCsv} disabled={adminLoading}>
               {adminLoading ? "Loading..." : "Download User CSV"}
             </button>
+            <button type="button" onClick={onDownloadNotificationAnalyticsCsv} disabled={adminLoading}>
+              {adminLoading ? "Loading..." : "Download Notification CSV"}
+            </button>
           </div>
+
+          {notificationAnalytics && (
+            <div className="top-gap">
+              <p>
+                Notification analytics: {notificationAnalytics.total_events} event(s) in last {notificationAnalytics.days} day(s), delivery rate {(notificationAnalytics.delivery_rate * 100).toFixed(1)}%
+              </p>
+              <p>
+                Delivered: {notificationAnalytics.delivered} • Failed: {notificationAnalytics.failed}
+              </p>
+              <p className="subtle">By channel:</p>
+              {notificationAnalytics.by_channel.length === 0 ? (
+                <p className="subtle">No channel analytics available.</p>
+              ) : (
+                <ul>
+                  {notificationAnalytics.by_channel.map((item) => (
+                    <li key={`notif-channel-${item.channel}`}>
+                      {item.channel} • total: {item.total} • delivered: {item.delivered} • failed: {item.failed} • rate: {(item.delivery_rate * 100).toFixed(1)}%
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="subtle">By status:</p>
+              {notificationAnalytics.by_status.length === 0 ? (
+                <p className="subtle">No status analytics available.</p>
+              ) : (
+                <ul>
+                  {notificationAnalytics.by_status.map((item) => (
+                    <li key={`notif-status-${item.key}`}>
+                      {item.key}: {item.count}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="subtle">By source:</p>
+              {notificationAnalytics.by_source.length === 0 ? (
+                <p className="subtle">No source analytics available.</p>
+              ) : (
+                <ul>
+                  {notificationAnalytics.by_source.map((item) => (
+                    <li key={`notif-source-${item.key}`}>
+                      {item.key}: {item.count}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           {analyticsResult && (
             <div className="top-gap">

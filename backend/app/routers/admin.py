@@ -31,6 +31,7 @@ from app.schemas import (
     DeadLetterReplayAuditItem,
     DeadLetterReplayResponse,
     NotificationLogItem,
+    NotificationAnalyticsResponse,
     NotificationSendRequest,
     NotificationSendResponse,
     QueueHealthResponse,
@@ -56,7 +57,7 @@ from app.services.redis_queue import (
     replay_dead_letter_jobs,
     summarize_dead_letter_jobs,
 )
-from app.services.notification_service import send_user_notification
+from app.services.notification_service import get_notification_analytics, send_user_notification
 from app.worker import run_scheduler_tick
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -298,6 +299,65 @@ def admin_notification_test_send(
     )
     db.commit()
     return NotificationSendResponse(id=row.id, status=row.status)
+
+
+@router.get(
+    "/notifications/analytics",
+    response_model=NotificationAnalyticsResponse,
+    dependencies=[Depends(admin_rate_limit)],
+)
+def admin_notification_analytics(
+    days: int = 30,
+    db: Session = Depends(get_db),
+) -> NotificationAnalyticsResponse:
+    return NotificationAnalyticsResponse(**get_notification_analytics(db, days=days))
+
+
+@router.get("/notifications/analytics.csv", dependencies=[Depends(admin_rate_limit)])
+def admin_notification_analytics_csv(
+    days: int = 30,
+    db: Session = Depends(get_db),
+) -> Response:
+    analytics = get_notification_analytics(db, days=days)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["scope", "key", "count", "delivered", "failed", "delivery_rate"])
+    writer.writerow(
+        [
+            "summary",
+            f"last_{analytics['days']}_days",
+            analytics["total_events"],
+            analytics["delivered"],
+            analytics["failed"],
+            analytics["delivery_rate"],
+        ]
+    )
+    for item in analytics["by_status"]:
+        writer.writerow(["status", item["key"], item["count"], "", "", ""])
+    for item in analytics["by_source"]:
+        writer.writerow(["source", item["key"], item["count"], "", "", ""])
+    for item in analytics["by_channel"]:
+        writer.writerow(
+            [
+                "channel",
+                item["channel"],
+                item["total"],
+                item["delivered"],
+                item["failed"],
+                item["delivery_rate"],
+            ]
+        )
+
+    csv_data = output.getvalue()
+    output.close()
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=notification_analytics_{analytics['days']}d.csv"
+        },
+    )
 
 
 def _record_dead_letter_replay_audit(

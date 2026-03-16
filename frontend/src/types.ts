@@ -156,6 +156,30 @@ export type NotificationSendResponse = {
   status: string;
 };
 
+export type NotificationAnalyticsBucket = {
+  key: string;
+  count: number;
+};
+
+export type NotificationChannelAnalyticsItem = {
+  channel: string;
+  total: number;
+  delivered: number;
+  failed: number;
+  delivery_rate: number;
+};
+
+export type NotificationAnalyticsResponse = {
+  days: number;
+  total_events: number;
+  delivered: number;
+  failed: number;
+  delivery_rate: number;
+  by_status: NotificationAnalyticsBucket[];
+  by_source: NotificationAnalyticsBucket[];
+  by_channel: NotificationChannelAnalyticsItem[];
+};
+
 export type DeadLetterReplayAuditItem = {
   id: number;
   dead_letter_id: string;
