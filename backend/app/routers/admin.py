@@ -3,7 +3,7 @@ import csv
 import io
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import case, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -16,6 +16,9 @@ from app.schemas import (
     DeadLetterBulkReplayRequest,
     DeadLetterBulkReplayResponse,
     DeadLetterDropResponse,
+    DeadLetterPurgeRequest,
+    DeadLetterPurgeResponse,
+    DeadLetterSummaryResponse,
     DeadLetterJobItem,
     DeadLetterReplayAuditItem,
     DeadLetterReplayResponse,
@@ -33,9 +36,11 @@ from app.services.redis_queue import (
     drop_dead_letter_jobs,
     get_dead_letter_job,
     list_dead_letter_jobs,
+    purge_dead_letter_jobs,
     queue_health,
     replay_dead_letter_job,
     replay_dead_letter_jobs,
+    summarize_dead_letter_jobs,
 )
 from app.worker import run_scheduler_tick
 
@@ -135,6 +140,16 @@ def admin_dead_letter_jobs(
         )
 
     return response
+
+
+@router.get(
+    "/dead-letter-summary",
+    response_model=DeadLetterSummaryResponse,
+    dependencies=[Depends(admin_rate_limit)],
+)
+def admin_dead_letter_summary() -> DeadLetterSummaryResponse:
+    summary = summarize_dead_letter_jobs()
+    return DeadLetterSummaryResponse(**summary)
 
 
 def _record_dead_letter_replay_audit(
@@ -257,6 +272,38 @@ def admin_drop_dead_letter_jobs_bulk(
 
     db.commit()
     return DeadLetterBulkDropResponse(dropped_ids=dropped_ids, failed_ids=failed_ids)
+
+
+@router.post(
+    "/dead-letter-jobs/purge",
+    response_model=DeadLetterPurgeResponse,
+    dependencies=[Depends(admin_rate_limit)],
+)
+def admin_purge_dead_letter_jobs(
+    payload: DeadLetterPurgeRequest,
+    db: Session = Depends(get_db),
+) -> DeadLetterPurgeResponse:
+    purged_ids = purge_dead_letter_jobs(
+        older_than_days=payload.older_than_days,
+        job_type=payload.job_type,
+        user_id=payload.user_id,
+        reason_contains=payload.reason_contains,
+        limit=payload.limit,
+    )
+
+    purged_audit_count = 0
+    if payload.include_replay_audits and purged_ids:
+        result = db.execute(
+            delete(DeadLetterReplayAudit).where(DeadLetterReplayAudit.dead_letter_id.in_(purged_ids))
+        )
+        purged_audit_count = int(result.rowcount or 0)
+        db.commit()
+
+    return DeadLetterPurgeResponse(
+        purged_dead_letter_ids=purged_ids,
+        purged_dead_letter_count=len(purged_ids),
+        purged_replay_audit_count=purged_audit_count,
+    )
 
 
 @router.post(

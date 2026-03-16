@@ -5,6 +5,7 @@ import {
   downloadUserAnalyticsCsv,
   dropDeadLetterJob,
   dropDeadLetterJobsBulk,
+  getDeadLetterSummary,
   getActionAnalytics,
   getUserAnalytics,
   authAnonymous,
@@ -19,6 +20,7 @@ import {
   listWorkerEvents,
   replayDeadLetterJob,
   replayDeadLetterJobsBulk,
+  purgeDeadLetterJobs,
   resolveSafetyFlag,
   submitIntake,
   triggerSchedulerTick,
@@ -27,6 +29,7 @@ import type {
   BanditAnalyticsResponse,
   DeadLetterReplayAuditItem,
   DeadLetterJobItem,
+  DeadLetterSummaryResponse,
   AnonymousAuthResponse,
   AuthTokenResponse,
   IntakeResponse,
@@ -60,6 +63,9 @@ export function App() {
   const [queueHealth, setQueueHealth] = useState<QueueHealthResponse | null>(null);
   const [deadLetterJobs, setDeadLetterJobs] = useState<DeadLetterJobItem[]>([]);
   const [deadLetterReplays, setDeadLetterReplays] = useState<DeadLetterReplayAuditItem[]>([]);
+  const [deadLetterSummary, setDeadLetterSummary] = useState<DeadLetterSummaryResponse | null>(null);
+  const [purgeOlderThanDays, setPurgeOlderThanDays] = useState(30);
+  const [purgeLimit, setPurgeLimit] = useState(500);
   const [selectedDeadLetterIds, setSelectedDeadLetterIds] = useState<string[]>([]);
   const [deadLetterOffset, setDeadLetterOffset] = useState(0);
   const [deadLetterReplayOffset, setDeadLetterReplayOffset] = useState(0);
@@ -526,6 +532,80 @@ export function App() {
 
       if (result.failed_ids.length > 0) {
         setError(`Some drop operations failed: ${result.failed_ids.join(", ")}`);
+      }
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onLoadDeadLetterSummary() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const summary = await getDeadLetterSummary(adminToken.trim());
+      setDeadLetterSummary(summary);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onPurgeDeadLetters() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    const key = adminToken.trim();
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const result = await purgeDeadLetterJobs(key, {
+        olderThanDays: purgeOlderThanDays,
+        jobType: deadLetterJobTypeFilter.trim() || undefined,
+        userId: deadLetterUserFilter.trim() || undefined,
+        reasonContains: deadLetterReasonFilter.trim() || undefined,
+        limit: purgeLimit,
+        includeReplayAudits: true,
+      });
+
+      const [health, jobs, replayAudits, summary] = await Promise.all([
+        getAdminQueueHealth(key),
+        listDeadLetterJobs(key, {
+          limit: 25,
+          offset: deadLetterOffset,
+          jobType: deadLetterJobTypeFilter.trim(),
+          userId: deadLetterUserFilter.trim(),
+          reason: deadLetterReasonFilter.trim(),
+        }),
+        listDeadLetterReplays(key, {
+          limit: 25,
+          offset: deadLetterReplayOffset,
+          replayStatus: deadLetterReplayStatusFilter.trim(),
+          adminUserId: deadLetterReplayAdminFilter.trim(),
+          jobUserId: deadLetterReplayUserFilter.trim(),
+        }),
+        getDeadLetterSummary(key),
+      ]);
+
+      setQueueHealth(health);
+      setDeadLetterJobs(jobs);
+      setDeadLetterReplays(replayAudits);
+      setDeadLetterSummary(summary);
+      setSelectedDeadLetterIds((previous) =>
+        previous.filter((id) => jobs.some((item) => item.dead_letter_id === id))
+      );
+
+      if (result.purged_dead_letter_count === 0) {
+        setError("Purge completed with no matching dead-letter jobs.");
       }
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
@@ -1104,6 +1184,36 @@ export function App() {
             {adminLoading ? "Loading..." : "Load Dead-Letter Replay Audits"}
           </button>
 
+          <button type="button" onClick={onLoadDeadLetterSummary} disabled={adminLoading}>
+            {adminLoading ? "Loading..." : "Load Dead-Letter Summary"}
+          </button>
+
+          <label>
+            Purge older than days
+            <input
+              type="number"
+              min={1}
+              max={3650}
+              value={purgeOlderThanDays}
+              onChange={(event) => setPurgeOlderThanDays(Number(event.target.value || 30))}
+            />
+          </label>
+
+          <label>
+            Purge limit
+            <input
+              type="number"
+              min={1}
+              max={5000}
+              value={purgeLimit}
+              onChange={(event) => setPurgeLimit(Number(event.target.value || 500))}
+            />
+          </label>
+
+          <button type="button" onClick={onPurgeDeadLetters} disabled={adminLoading}>
+            {adminLoading ? "Loading..." : "Purge Dead-Letter Jobs"}
+          </button>
+
           <label>
             Replay status filter
             <input
@@ -1239,6 +1349,28 @@ export function App() {
                 </li>
               ))}
             </ul>
+          )}
+
+          {deadLetterSummary && (
+            <div className="top-gap">
+              <p>Dead-letter summary total: {deadLetterSummary.total}</p>
+              <p className="subtle">By job type:</p>
+              <ul>
+                {deadLetterSummary.by_job_type.map((item) => (
+                  <li key={`jobtype-${item.key}`}>
+                    {item.key}: {item.count}
+                  </li>
+                ))}
+              </ul>
+              <p className="subtle">By reason:</p>
+              <ul>
+                {deadLetterSummary.by_reason.map((item) => (
+                  <li key={`reason-${item.key}`}>
+                    {item.key}: {item.count}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
 
           <div className="stack top-gap">

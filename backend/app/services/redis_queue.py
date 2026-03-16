@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import redis
@@ -230,6 +230,116 @@ def drop_dead_letter_jobs(dead_letter_ids: list[str]) -> tuple[list[str], list[s
             dropped_payloads[normalized_id] = dropped_payload
 
     return dropped_ids, failed_ids, dropped_payloads
+
+
+def _parse_iso_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def summarize_dead_letter_jobs() -> dict[str, Any]:
+    try:
+        client = _get_client()
+        raw_items = client.lrange(DEAD_LETTER_KEY, 0, -1)
+    except redis.RedisError:
+        return {"total": 0, "by_job_type": [], "by_reason": []}
+
+    job_type_counts: dict[str, int] = {}
+    reason_counts: dict[str, int] = {}
+    total = 0
+
+    for raw in raw_items:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+
+        if not isinstance(payload, dict):
+            continue
+
+        total += 1
+        job_type = str(payload.get("job_type") or "unknown")
+        reason = str(payload.get("dead_letter_reason") or "unknown")
+        job_type_counts[job_type] = job_type_counts.get(job_type, 0) + 1
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+
+    by_job_type = [{"key": key, "count": count} for key, count in sorted(job_type_counts.items())]
+    by_reason = [{"key": key, "count": count} for key, count in sorted(reason_counts.items())]
+    return {"total": total, "by_job_type": by_job_type, "by_reason": by_reason}
+
+
+def purge_dead_letter_jobs(
+    *,
+    older_than_days: int | None = None,
+    job_type: str | None = None,
+    user_id: str | None = None,
+    reason_contains: str | None = None,
+    limit: int = 1000,
+) -> list[str]:
+    safe_limit = max(1, min(limit, 5000))
+    filter_job_type = (job_type or "").strip().lower()
+    filter_user_id = (user_id or "").strip().lower()
+    filter_reason = (reason_contains or "").strip().lower()
+    cutoff = None
+    if older_than_days is not None:
+        cutoff = datetime.utcnow() - timedelta(days=max(0, older_than_days))
+
+    try:
+        client = _get_client()
+        raw_items = client.lrange(DEAD_LETTER_KEY, 0, -1)
+    except redis.RedisError:
+        return []
+
+    purged_ids: list[str] = []
+    for raw in raw_items:
+        if len(purged_ids) >= safe_limit:
+            break
+
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+
+        if not isinstance(payload, dict):
+            continue
+
+        payload_job_type = str(payload.get("job_type", "")).strip().lower()
+        payload_user_id = str(payload.get("user_id", "")).strip().lower()
+        payload_reason = str(payload.get("dead_letter_reason", "")).strip().lower()
+        dead_letter_id = str(payload.get("dead_letter_id", "")).strip()
+        dead_lettered_at = _parse_iso_datetime(payload.get("dead_lettered_at"))
+
+        if not dead_letter_id:
+            continue
+        if filter_job_type and payload_job_type != filter_job_type:
+            continue
+        if filter_user_id and payload_user_id != filter_user_id:
+            continue
+        if filter_reason and filter_reason not in payload_reason:
+            continue
+        if cutoff is not None:
+            if dead_lettered_at is None:
+                continue
+            if dead_lettered_at > cutoff:
+                continue
+
+        removed = client.lrem(DEAD_LETTER_KEY, 1, raw)
+        if int(removed) > 0:
+            purged_ids.append(dead_letter_id)
+
+    return purged_ids
 
 
 def replay_dead_letter_job(dead_letter_id: str) -> dict[str, Any] | None:

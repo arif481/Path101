@@ -145,6 +145,32 @@ class DeadLetterBulkDropResponse(BaseModel):
     failed_ids: list[str]
 
 
+class DeadLetterSummaryBucket(BaseModel):
+    key: str
+    count: int
+
+
+class DeadLetterSummaryResponse(BaseModel):
+    total: int
+    by_job_type: list[DeadLetterSummaryBucket]
+    by_reason: list[DeadLetterSummaryBucket]
+
+
+class DeadLetterPurgeRequest(BaseModel):
+    older_than_days: int | None = Field(default=None, ge=1, le=3650)
+    job_type: str | None = None
+    user_id: str | None = None
+    reason_contains: str | None = None
+    limit: int = Field(default=1000, ge=1, le=5000)
+    include_replay_audits: bool = True
+
+
+class DeadLetterPurgeResponse(BaseModel):
+    purged_dead_letter_ids: list[str]
+    purged_dead_letter_count: int
+    purged_replay_audit_count: int
+
+
 class DeadLetterReplayAuditItem(BaseModel):
     id: int
     dead_letter_id: str

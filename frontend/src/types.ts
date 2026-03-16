@@ -106,6 +106,23 @@ export type DeadLetterBulkDropResponse = {
   failed_ids: string[];
 };
 
+export type DeadLetterSummaryBucket = {
+  key: string;
+  count: number;
+};
+
+export type DeadLetterSummaryResponse = {
+  total: number;
+  by_job_type: DeadLetterSummaryBucket[];
+  by_reason: DeadLetterSummaryBucket[];
+};
+
+export type DeadLetterPurgeResponse = {
+  purged_dead_letter_ids: string[];
+  purged_dead_letter_count: number;
+  purged_replay_audit_count: number;
+};
+
 export type DeadLetterReplayAuditItem = {
   id: number;
   dead_letter_id: string;

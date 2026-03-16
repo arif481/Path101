@@ -114,6 +114,8 @@ GitHub Actions runs both backend and frontend checks on push/PR to `main`.
 - `POST /admin/dead-letter-jobs/{dead_letter_id}/drop` (requires admin Bearer token)
 - `POST /admin/dead-letter-jobs/replay-bulk` (requires admin Bearer token)
 - `POST /admin/dead-letter-jobs/drop-bulk` (requires admin Bearer token)
+- `GET /admin/dead-letter-summary` (requires admin Bearer token)
+- `POST /admin/dead-letter-jobs/purge` (requires admin Bearer token)
 - `GET /admin/dead-letter-replays` and `GET /admin/dead-letter-replays.csv` (requires admin Bearer token)
 - `GET /admin/dead-letter-replays/filter` (requires admin Bearer token)
 - `GET /admin/analytics/actions` and `GET /admin/analytics/users` (requires admin Bearer token)

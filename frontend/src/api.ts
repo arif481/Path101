@@ -6,8 +6,10 @@ import type {
   DeadLetterBulkReplayResponse,
   DeadLetterDropResponse,
   DeadLetterJobItem,
+  DeadLetterPurgeResponse,
   DeadLetterReplayAuditItem,
   DeadLetterReplayResponse,
+  DeadLetterSummaryResponse,
   IntakeRequest,
   IntakeResponse,
   MeResponse,
@@ -318,6 +320,53 @@ export async function dropDeadLetterJobsBulk(
   }
 
   return response.json() as Promise<DeadLetterBulkDropResponse>;
+}
+
+export async function getDeadLetterSummary(adminKey: string): Promise<DeadLetterSummaryResponse> {
+  const response = await fetch(`${BASE_URL}/admin/dead-letter-summary`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Dead-letter summary request failed");
+  }
+
+  return response.json() as Promise<DeadLetterSummaryResponse>;
+}
+
+export async function purgeDeadLetterJobs(
+  adminKey: string,
+  payload: {
+    olderThanDays?: number;
+    jobType?: string;
+    userId?: string;
+    reasonContains?: string;
+    limit?: number;
+    includeReplayAudits?: boolean;
+  }
+): Promise<DeadLetterPurgeResponse> {
+  const response = await fetch(`${BASE_URL}/admin/dead-letter-jobs/purge`, {
+    method: "POST",
+    headers: {
+      ...adminHeaders(adminKey),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      older_than_days: payload.olderThanDays,
+      job_type: payload.jobType,
+      user_id: payload.userId,
+      reason_contains: payload.reasonContains,
+      limit: payload.limit ?? 1000,
+      include_replay_audits: payload.includeReplayAudits ?? true,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Dead-letter purge request failed");
+  }
+
+  return response.json() as Promise<DeadLetterPurgeResponse>;
 }
 
 export async function listDeadLetterReplays(

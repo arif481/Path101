@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta
 
 from app.services import redis_queue
 
@@ -174,3 +175,93 @@ def test_drop_dead_letter_jobs_reports_failures(monkeypatch) -> None:
     assert failed_ids == ["missing"]
     assert set(dropped_payloads.keys()) == {"dead_bulk_1", "dead_bulk_2"}
     assert fake.lrange(redis_queue.DEAD_LETTER_KEY, 0, -1) == []
+
+
+def test_summarize_dead_letter_jobs_counts_by_type_and_reason(monkeypatch) -> None:
+    fake = FakeRedis()
+    monkeypatch.setattr(redis_queue, "_get_client", lambda: fake)
+
+    fake.rpush(
+        redis_queue.DEAD_LETTER_KEY,
+        json.dumps(
+            {
+                "dead_letter_id": "sum_1",
+                "job_type": "session_completed",
+                "dead_letter_reason": "max_retries_exceeded",
+            }
+        ),
+    )
+    fake.rpush(
+        redis_queue.DEAD_LETTER_KEY,
+        json.dumps(
+            {
+                "dead_letter_id": "sum_2",
+                "job_type": "session_completed",
+                "dead_letter_reason": "job_processing_failed",
+            }
+        ),
+    )
+    fake.rpush(
+        redis_queue.DEAD_LETTER_KEY,
+        json.dumps(
+            {
+                "dead_letter_id": "sum_3",
+                "job_type": "session_nudge",
+                "dead_letter_reason": "job_processing_failed",
+            }
+        ),
+    )
+
+    summary = redis_queue.summarize_dead_letter_jobs()
+    assert summary["total"] == 3
+
+    type_counts = {item["key"]: item["count"] for item in summary["by_job_type"]}
+    reason_counts = {item["key"]: item["count"] for item in summary["by_reason"]}
+    assert type_counts == {"session_completed": 2, "session_nudge": 1}
+    assert reason_counts == {"job_processing_failed": 2, "max_retries_exceeded": 1}
+
+
+def test_purge_dead_letter_jobs_filters_by_age_and_reason(monkeypatch) -> None:
+    fake = FakeRedis()
+    monkeypatch.setattr(redis_queue, "_get_client", lambda: fake)
+
+    old_time = (datetime.utcnow() - timedelta(days=45)).isoformat()
+    recent_time = (datetime.utcnow() - timedelta(days=5)).isoformat()
+
+    fake.rpush(
+        redis_queue.DEAD_LETTER_KEY,
+        json.dumps(
+            {
+                "dead_letter_id": "purge_old",
+                "job_type": "session_completed",
+                "user_id": "user_x",
+                "dead_letter_reason": "max_retries_exceeded",
+                "dead_lettered_at": old_time,
+            }
+        ),
+    )
+    fake.rpush(
+        redis_queue.DEAD_LETTER_KEY,
+        json.dumps(
+            {
+                "dead_letter_id": "purge_recent",
+                "job_type": "session_completed",
+                "user_id": "user_x",
+                "dead_letter_reason": "max_retries_exceeded",
+                "dead_lettered_at": recent_time,
+            }
+        ),
+    )
+
+    purged_ids = redis_queue.purge_dead_letter_jobs(
+        older_than_days=30,
+        job_type="session_completed",
+        user_id="user_x",
+        reason_contains="max_retries",
+        limit=50,
+    )
+
+    assert purged_ids == ["purge_old"]
+
+    remaining = [json.loads(item)["dead_letter_id"] for item in fake.lrange(redis_queue.DEAD_LETTER_KEY, 0, -1)]
+    assert remaining == ["purge_recent"]
