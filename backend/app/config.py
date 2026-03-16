@@ -55,6 +55,7 @@ class Settings:
     admin_rate_limit_count: int
     admin_rate_limit_window_seconds: int
     worker_max_retries: int
+    notification_channels: list[str]
 
 
 SETTINGS = Settings(
@@ -85,6 +86,7 @@ SETTINGS = Settings(
     admin_rate_limit_count=int(os.getenv("ADMIN_RATE_LIMIT_COUNT", "120")),
     admin_rate_limit_window_seconds=int(os.getenv("ADMIN_RATE_LIMIT_WINDOW_SECONDS", "60")),
     worker_max_retries=int(os.getenv("WORKER_MAX_RETRIES", "3")),
+    notification_channels=parse_csv(os.getenv("NOTIFICATION_CHANNELS"), ["in_app", "email"]),
 )
 
 
@@ -126,3 +128,4 @@ AUTH_RATE_LIMIT_WINDOW_SECONDS = SETTINGS.auth_rate_limit_window_seconds
 ADMIN_RATE_LIMIT_COUNT = SETTINGS.admin_rate_limit_count
 ADMIN_RATE_LIMIT_WINDOW_SECONDS = SETTINGS.admin_rate_limit_window_seconds
 WORKER_MAX_RETRIES = SETTINGS.worker_max_retries
+NOTIFICATION_CHANNELS = [value.strip().lower() for value in SETTINGS.notification_channels]

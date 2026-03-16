@@ -123,6 +123,22 @@ export type DeadLetterPurgeResponse = {
   purged_replay_audit_count: number;
 };
 
+export type NotificationLogItem = {
+  id: number;
+  user_id: string;
+  channel: string;
+  status: string;
+  source: string;
+  message: string;
+  error_detail: string | null;
+  created_at: string;
+};
+
+export type NotificationSendResponse = {
+  id: number;
+  status: string;
+};
+
 export type DeadLetterReplayAuditItem = {
   id: number;
   dead_letter_id: string;

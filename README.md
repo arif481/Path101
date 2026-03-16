@@ -62,6 +62,7 @@ Worker scheduler settings (optional):
 - `AUTH_RATE_LIMIT_COUNT` / `AUTH_RATE_LIMIT_WINDOW_SECONDS`
 - `ADMIN_RATE_LIMIT_COUNT` / `ADMIN_RATE_LIMIT_WINDOW_SECONDS`
 - `WORKER_MAX_RETRIES` (default `3`)
+- `NOTIFICATION_CHANNELS` (default `in_app,email`)
 
 The worker scans for incomplete sessions scheduled in the configured window and enqueues `session_nudge` jobs with Redis dedupe locks.
 Failed worker jobs are retried up to `WORKER_MAX_RETRIES` and then moved to a Redis dead-letter queue.
@@ -109,6 +110,8 @@ GitHub Actions runs both backend and frontend checks on push/PR to `main`.
 - `GET /admin/flags` (requires admin Bearer token)
 - `POST /admin/flag/{id}/resolve` (requires admin Bearer token)
 - `GET /admin/queue-health` (requires admin Bearer token)
+- `GET /admin/notifications` (requires admin Bearer token)
+- `POST /admin/notifications/test-send` (requires admin Bearer token)
 - `GET /admin/dead-letter-jobs` (requires admin Bearer token)
 - `POST /admin/dead-letter-jobs/{dead_letter_id}/replay` (requires admin Bearer token)
 - `POST /admin/dead-letter-jobs/{dead_letter_id}/drop` (requires admin Bearer token)
@@ -180,3 +183,4 @@ For `path101-web`:
 - `AUTO_MIGRATE` is opt-in and defaults to `false`; leave it disabled in production.
 - CORS and trusted hosts are environment-driven (`CORS_ORIGINS`, `TRUSTED_HOSTS`).
 - Request rate limiting is Redis-backed when `REDIS_URL` is available, with in-memory fallback for local resilience.
+- Worker nudge jobs emit notification delivery logs (`delivered`/`failed`) based on `NOTIFICATION_CHANNELS`.

@@ -17,6 +17,7 @@ from app.config import (
 )
 from app.db import SessionLocal
 from app.models.db_models import BanditLog, SessionRecord
+from app.services.notification_service import send_user_notification
 from app.services.redis_queue import (
     acquire_nudge_lock,
     dequeue_session_job,
@@ -78,6 +79,24 @@ def process_job(job: dict[str, Any]) -> bool:
 
     db = SessionLocal()
     try:
+        if job_type == "session_nudge":
+            session_id = str(payload.get("session_id") or "session_unknown")
+            notification = send_user_notification(
+                db=db,
+                user_id=user_id,
+                channel=str(payload.get("channel") or "in_app"),
+                message=f"Session reminder: {session_id}",
+                source="worker_nudge",
+                metadata={
+                    "session_id": session_id,
+                    "scheduled_at": payload.get("scheduled_at"),
+                },
+            )
+            if notification.status != "delivered":
+                db.rollback()
+                logger.warning("Notification failed for session_nudge user_id=%s", user_id)
+                return False
+
         bandit_log = BanditLog(
             user_id=user_id,
             context_json=context_json,

@@ -22,14 +22,17 @@ import {
   replayDeadLetterJobsBulk,
   purgeDeadLetterJobs,
   resolveSafetyFlag,
+  sendTestNotification,
   submitIntake,
   triggerSchedulerTick,
+  listNotificationLogs,
 } from "./api";
 import type {
   BanditAnalyticsResponse,
   DeadLetterReplayAuditItem,
   DeadLetterJobItem,
   DeadLetterSummaryResponse,
+  NotificationLogItem,
   AnonymousAuthResponse,
   AuthTokenResponse,
   IntakeResponse,
@@ -66,6 +69,14 @@ export function App() {
   const [deadLetterSummary, setDeadLetterSummary] = useState<DeadLetterSummaryResponse | null>(null);
   const [purgeOlderThanDays, setPurgeOlderThanDays] = useState(30);
   const [purgeLimit, setPurgeLimit] = useState(500);
+  const [notificationLogs, setNotificationLogs] = useState<NotificationLogItem[]>([]);
+  const [notificationOffset, setNotificationOffset] = useState(0);
+  const [notificationUserFilter, setNotificationUserFilter] = useState("");
+  const [notificationChannelFilter, setNotificationChannelFilter] = useState("");
+  const [notificationStatusFilter, setNotificationStatusFilter] = useState("");
+  const [notificationSendUserId, setNotificationSendUserId] = useState("");
+  const [notificationSendChannel, setNotificationSendChannel] = useState("in_app");
+  const [notificationSendMessage, setNotificationSendMessage] = useState("Path101 test notification");
   const [selectedDeadLetterIds, setSelectedDeadLetterIds] = useState<string[]>([]);
   const [deadLetterOffset, setDeadLetterOffset] = useState(0);
   const [deadLetterReplayOffset, setDeadLetterReplayOffset] = useState(0);
@@ -158,12 +169,20 @@ export function App() {
           adminUserId: deadLetterReplayAdminFilter.trim(),
           jobUserId: deadLetterReplayUserFilter.trim(),
         }),
+        listNotificationLogs(key, {
+          limit: 25,
+          offset: notificationOffset,
+          userId: notificationUserFilter.trim(),
+          channel: notificationChannelFilter.trim(),
+          status: notificationStatusFilter.trim(),
+        }),
       ])
-        .then(([events, health, deadLetters, replayAudits]) => {
+        .then(([events, health, deadLetters, replayAudits, notifications]) => {
           setWorkerEvents(events);
           setQueueHealth(health);
           setDeadLetterJobs(deadLetters);
           setDeadLetterReplays(replayAudits);
+          setNotificationLogs(notifications);
         })
         .catch(() => {
           setPollMode(false);
@@ -184,6 +203,10 @@ export function App() {
     deadLetterReplayStatusFilter,
     deadLetterReplayAdminFilter,
     deadLetterReplayUserFilter,
+    notificationOffset,
+    notificationUserFilter,
+    notificationChannelFilter,
+    notificationStatusFilter,
   ]);
 
   function persistSession(result: AuthTokenResponse | AnonymousAuthResponse) {
@@ -229,6 +252,17 @@ export function App() {
       jobUserId: deadLetterReplayUserFilter.trim(),
     });
     setDeadLetterReplays(replayAudits);
+  }
+
+  async function loadNotificationLogsForAdmin(key: string) {
+    const notifications = await listNotificationLogs(key, {
+      limit: 25,
+      offset: notificationOffset,
+      userId: notificationUserFilter.trim(),
+      channel: notificationChannelFilter.trim(),
+      status: notificationStatusFilter.trim(),
+    });
+    setNotificationLogs(notifications);
   }
 
   async function onAnonymousSignIn() {
@@ -631,6 +665,52 @@ export function App() {
     }
   }
 
+  async function onLoadNotificationLogs() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      await loadNotificationLogsForAdmin(adminToken.trim());
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onSendTestNotification() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    const key = adminToken.trim();
+    if (!notificationSendUserId.trim()) {
+      setError("Notification user_id is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      await sendTestNotification(key, {
+        userId: notificationSendUserId.trim(),
+        channel: notificationSendChannel.trim(),
+        message: notificationSendMessage,
+      });
+      await loadNotificationLogsForAdmin(key);
+      await onLoadQueueHealth();
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
   function onApplyDeadLetterFilters() {
     setDeadLetterOffset(0);
     if (!adminToken.trim()) {
@@ -690,6 +770,34 @@ export function App() {
       });
   }
 
+  function onApplyNotificationFilters() {
+    setNotificationOffset(0);
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    const key = adminToken.trim();
+    setAdminLoading(true);
+    setError(null);
+    void listNotificationLogs(key, {
+      limit: 25,
+      offset: 0,
+      userId: notificationUserFilter.trim(),
+      channel: notificationChannelFilter.trim(),
+      status: notificationStatusFilter.trim(),
+    })
+      .then((notifications) => {
+        setNotificationLogs(notifications);
+      })
+      .catch((caughtError: unknown) => {
+        setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+      })
+      .finally(() => {
+        setAdminLoading(false);
+      });
+  }
+
   async function onDeadLetterPageChange(nextOffset: number) {
     if (!adminToken.trim()) {
       setError("Admin token is required.");
@@ -738,6 +846,33 @@ export function App() {
       });
       setDeadLetterReplayOffset(safeOffset);
       setDeadLetterReplays(replayAudits);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onNotificationPageChange(nextOffset: number) {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    const safeOffset = Math.max(0, nextOffset);
+    const key = adminToken.trim();
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const notifications = await listNotificationLogs(key, {
+        limit: 25,
+        offset: safeOffset,
+        userId: notificationUserFilter.trim(),
+        channel: notificationChannelFilter.trim(),
+        status: notificationStatusFilter.trim(),
+      });
+      setNotificationOffset(safeOffset);
+      setNotificationLogs(notifications);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
     } finally {
@@ -1271,6 +1406,94 @@ export function App() {
             {adminLoading ? "Loading..." : "Download Dead-Letter Replay CSV"}
           </button>
 
+          <button type="button" onClick={onLoadNotificationLogs} disabled={adminLoading}>
+            {adminLoading ? "Loading..." : "Load Notification Logs"}
+          </button>
+
+          <label>
+            Notification user filter
+            <input
+              value={notificationUserFilter}
+              onChange={(event) => setNotificationUserFilter(event.target.value)}
+              placeholder="user id"
+            />
+          </label>
+
+          <label>
+            Notification channel filter
+            <input
+              value={notificationChannelFilter}
+              onChange={(event) => setNotificationChannelFilter(event.target.value)}
+              placeholder="in_app"
+            />
+          </label>
+
+          <label>
+            Notification status filter
+            <input
+              value={notificationStatusFilter}
+              onChange={(event) => setNotificationStatusFilter(event.target.value)}
+              placeholder="delivered or failed"
+            />
+          </label>
+
+          <div className="stack">
+            <button type="button" onClick={onApplyNotificationFilters} disabled={adminLoading}>
+              {adminLoading ? "Loading..." : "Apply Notification Filters"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void onNotificationPageChange(notificationOffset - 25);
+              }}
+              disabled={adminLoading || notificationOffset === 0}
+            >
+              Previous Notification Page
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void onNotificationPageChange(notificationOffset + 25);
+              }}
+              disabled={adminLoading || notificationLogs.length < 25}
+            >
+              Next Notification Page
+            </button>
+          </div>
+
+          <p className="subtle">Notification offset: {notificationOffset}</p>
+
+          <label>
+            Notification test user_id
+            <input
+              value={notificationSendUserId}
+              onChange={(event) => setNotificationSendUserId(event.target.value)}
+              placeholder="user id"
+            />
+          </label>
+
+          <label>
+            Notification test channel
+            <input
+              value={notificationSendChannel}
+              onChange={(event) => setNotificationSendChannel(event.target.value)}
+              placeholder="in_app"
+            />
+          </label>
+
+          <label>
+            Notification test message
+            <textarea
+              value={notificationSendMessage}
+              onChange={(event) => setNotificationSendMessage(event.target.value)}
+              rows={2}
+            />
+          </label>
+
+          <button type="button" onClick={onSendTestNotification} disabled={adminLoading}>
+            {adminLoading ? "Loading..." : "Send Test Notification"}
+          </button>
+
           <button type="button" onClick={onTriggerSchedulerTick} disabled={adminLoading}>
             {adminLoading ? "Loading..." : "Run Scheduler Tick Now"}
           </button>
@@ -1346,6 +1569,19 @@ export function App() {
                 <li key={audit.id}>
                   #{audit.id} • {audit.replay_status} • {audit.dead_letter_id} • {audit.job_type} •
                   job user: {audit.job_user_id} • admin: {audit.admin_user_id}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {notificationLogs.length === 0 ? (
+            <p className="subtle">No notification logs loaded.</p>
+          ) : (
+            <ul>
+              {notificationLogs.map((item) => (
+                <li key={item.id}>
+                  #{item.id} • {item.status} • {item.channel} • {item.user_id} • {item.source}
+                  {item.error_detail ? ` • error: ${item.error_detail}` : ""}
                 </li>
               ))}
             </ul>

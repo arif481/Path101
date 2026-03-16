@@ -21,6 +21,8 @@ services:
         sync: false
       - key: REDIS_URL
         sync: false
+      - key: NOTIFICATION_CHANNELS
+        value: "in_app,email"
       - key: CORS_ORIGINS
         sync: false
       - key: TRUSTED_HOSTS
@@ -55,6 +57,8 @@ services:
         value: "3"
       - key: WORKER_MAX_RETRIES
         value: "3"
+      - key: NOTIFICATION_CHANNELS
+        value: "in_app,email"
       - key: JWT_SECRET
         sync: false
       - key: ADMIN_EMAIL_ALLOWLIST

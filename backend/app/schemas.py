@@ -181,6 +181,28 @@ class DeadLetterReplayAuditItem(BaseModel):
     replayed_at: datetime
 
 
+class NotificationLogItem(BaseModel):
+    id: int
+    user_id: str
+    channel: str
+    status: str
+    source: str
+    message: str
+    error_detail: str | None
+    created_at: datetime
+
+
+class NotificationSendRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=64)
+    channel: str = Field(..., min_length=2, max_length=32)
+    message: str = Field(..., min_length=1, max_length=1000)
+
+
+class NotificationSendResponse(BaseModel):
+    id: int
+    status: str
+
+
 class WorkerEventItem(BaseModel):
     id: int
     user_id: str

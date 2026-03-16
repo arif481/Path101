@@ -13,6 +13,8 @@ import type {
   IntakeRequest,
   IntakeResponse,
   MeResponse,
+  NotificationLogItem,
+  NotificationSendResponse,
   QueueHealthResponse,
   ResolveReviewStatus,
   SchedulerTickResponse,
@@ -144,6 +146,69 @@ export async function getAdminQueueHealth(adminKey: string): Promise<QueueHealth
   }
 
   return response.json() as Promise<QueueHealthResponse>;
+}
+
+export async function listNotificationLogs(
+  adminKey: string,
+  options?: {
+    limit?: number;
+    offset?: number;
+    userId?: string;
+    channel?: string;
+    status?: string;
+  }
+): Promise<NotificationLogItem[]> {
+  const params = new URLSearchParams();
+  params.set("limit", String(options?.limit ?? 50));
+  params.set("offset", String(options?.offset ?? 0));
+  if (options?.userId) {
+    params.set("user_id", options.userId);
+  }
+  if (options?.channel) {
+    params.set("channel", options.channel);
+  }
+  if (options?.status) {
+    params.set("status", options.status);
+  }
+
+  const response = await fetch(`${BASE_URL}/admin/notifications?${params.toString()}`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Notification log request failed");
+  }
+
+  return response.json() as Promise<NotificationLogItem[]>;
+}
+
+export async function sendTestNotification(
+  adminKey: string,
+  payload: {
+    userId: string;
+    channel: string;
+    message: string;
+  }
+): Promise<NotificationSendResponse> {
+  const response = await fetch(`${BASE_URL}/admin/notifications/test-send`, {
+    method: "POST",
+    headers: {
+      ...adminHeaders(adminKey),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      user_id: payload.userId,
+      channel: payload.channel,
+      message: payload.message,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Notification send request failed");
+  }
+
+  return response.json() as Promise<NotificationSendResponse>;
 }
 
 export async function listSafetyFlags(

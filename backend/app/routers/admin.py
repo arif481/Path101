@@ -7,7 +7,15 @@ from sqlalchemy import case, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models.db_models import BanditLog, DeadLetterReplayAudit, Plan, SafetyFlag, SessionRecord, User
+from app.models.db_models import (
+    BanditLog,
+    DeadLetterReplayAudit,
+    NotificationLog,
+    Plan,
+    SafetyFlag,
+    SessionRecord,
+    User,
+)
 from app.schemas import (
     ActionAnalyticsItem,
     DeadLetterBulkDropRequest,
@@ -22,6 +30,9 @@ from app.schemas import (
     DeadLetterJobItem,
     DeadLetterReplayAuditItem,
     DeadLetterReplayResponse,
+    NotificationLogItem,
+    NotificationSendRequest,
+    NotificationSendResponse,
     QueueHealthResponse,
     ResolveFlagRequest,
     SafetyFlagItem,
@@ -42,6 +53,7 @@ from app.services.redis_queue import (
     replay_dead_letter_jobs,
     summarize_dead_letter_jobs,
 )
+from app.services.notification_service import send_user_notification
 from app.worker import run_scheduler_tick
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -150,6 +162,64 @@ def admin_dead_letter_jobs(
 def admin_dead_letter_summary() -> DeadLetterSummaryResponse:
     summary = summarize_dead_letter_jobs()
     return DeadLetterSummaryResponse(**summary)
+
+
+@router.get("/notifications", response_model=list[NotificationLogItem], dependencies=[Depends(admin_rate_limit)])
+def admin_notification_logs(
+    limit: int = 50,
+    offset: int = 0,
+    user_id: str | None = None,
+    channel: str | None = None,
+    status: str | None = None,
+    db: Session = Depends(get_db),
+) -> list[NotificationLogItem]:
+    safe_limit = max(1, min(limit, 200))
+    safe_offset = max(0, offset)
+    statement = select(NotificationLog)
+    if user_id:
+        statement = statement.where(NotificationLog.user_id == user_id)
+    if channel:
+        statement = statement.where(NotificationLog.channel == channel)
+    if status:
+        statement = statement.where(NotificationLog.status == status)
+
+    rows = db.scalars(
+        statement.order_by(NotificationLog.created_at.desc()).offset(safe_offset).limit(safe_limit)
+    ).all()
+    return [
+        NotificationLogItem(
+            id=row.id,
+            user_id=row.user_id,
+            channel=row.channel,
+            status=row.status,
+            source=row.source,
+            message=row.message,
+            error_detail=row.error_detail,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post(
+    "/notifications/test-send",
+    response_model=NotificationSendResponse,
+    dependencies=[Depends(admin_rate_limit)],
+)
+def admin_notification_test_send(
+    payload: NotificationSendRequest,
+    db: Session = Depends(get_db),
+) -> NotificationSendResponse:
+    row = send_user_notification(
+        db=db,
+        user_id=payload.user_id,
+        channel=payload.channel,
+        message=payload.message,
+        source="admin_test_send",
+        metadata={"trigger": "admin"},
+    )
+    db.commit()
+    return NotificationSendResponse(id=row.id, status=row.status)
 
 
 def _record_dead_letter_replay_audit(
