@@ -66,8 +66,25 @@ export type SafetyFlagItem = {
   id: number;
   user_id: string;
   trigger_type: string;
+  severity_score: number;
+  escalation_status: string;
   review_status: string;
+  triage_notes: string | null;
+  reviewed_at: string | null;
+  reviewer_user_id: string | null;
   created_at: string;
+};
+
+export type SafetyFlagAnalyticsBucket = {
+  key: string;
+  count: number;
+};
+
+export type SafetyFlagAnalyticsResponse = {
+  total_flags: number;
+  avg_severity: number;
+  by_review_status: SafetyFlagAnalyticsBucket[];
+  by_escalation_status: SafetyFlagAnalyticsBucket[];
 };
 
 export type QueueHealthResponse = {

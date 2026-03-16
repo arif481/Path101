@@ -93,12 +93,35 @@ class SafetyFlagItem(BaseModel):
     id: int
     user_id: str
     trigger_type: str
+    severity_score: int
+    escalation_status: str
     review_status: str
+    triage_notes: str | None = None
+    reviewed_at: datetime | None = None
+    reviewer_user_id: str | None = None
     created_at: datetime
 
 
 class ResolveFlagRequest(BaseModel):
     review_status: Literal["resolved", "dismissed"]
+
+
+class TriageFlagRequest(BaseModel):
+    review_status: Literal["pending", "in_review", "resolved", "dismissed"]
+    escalation_status: Literal["none", "watch", "escalated", "urgent"]
+    triage_notes: str = Field(default="", max_length=2000)
+
+
+class SafetyFlagAnalyticsBucket(BaseModel):
+    key: str
+    count: int
+
+
+class SafetyFlagAnalyticsResponse(BaseModel):
+    total_flags: int
+    avg_severity: float
+    by_review_status: list[SafetyFlagAnalyticsBucket]
+    by_escalation_status: list[SafetyFlagAnalyticsBucket]
 
 
 class QueueHealthResponse(BaseModel):

@@ -103,8 +103,13 @@ class SafetyFlag(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     trigger_type: Mapped[str] = mapped_column(String(64))
+    severity_score: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    escalation_status: Mapped[str] = mapped_column(String(32), default="none", index=True)
     raw_text_encrypted: Mapped[str] = mapped_column(Text)
     review_status: Mapped[str] = mapped_column(String(32), default="pending")
+    triage_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewer_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 

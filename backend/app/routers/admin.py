@@ -36,7 +36,10 @@ from app.schemas import (
     QueueHealthResponse,
     ResolveFlagRequest,
     SafetyFlagItem,
+    SafetyFlagAnalyticsBucket,
+    SafetyFlagAnalyticsResponse,
     SchedulerTickResponse,
+    TriageFlagRequest,
     UserAnalyticsItem,
     UserAnalyticsResponse,
     WorkerEventItem,
@@ -88,7 +91,12 @@ def list_flags(
             id=row.id,
             user_id=row.user_id,
             trigger_type=row.trigger_type,
+            severity_score=row.severity_score,
+            escalation_status=row.escalation_status,
             review_status=row.review_status,
+            triage_notes=row.triage_notes,
+            reviewed_at=row.reviewed_at,
+            reviewer_user_id=row.reviewer_user_id,
             created_at=row.created_at,
         )
         for row in rows
@@ -96,15 +104,85 @@ def list_flags(
 
 
 @router.post("/flag/{flag_id}/resolve", dependencies=[Depends(admin_rate_limit)])
-def resolve_flag(flag_id: int, payload: ResolveFlagRequest, db: Session = Depends(get_db)) -> dict[str, str]:
+def resolve_flag(
+    flag_id: int,
+    payload: ResolveFlagRequest,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_current_admin_user),
+) -> dict[str, str]:
     row = db.get(SafetyFlag, flag_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Flag not found")
 
     row.review_status = payload.review_status
+    row.reviewed_at = datetime.utcnow()
+    row.reviewer_user_id = admin_user.id
+    if payload.review_status in {"resolved", "dismissed"} and row.escalation_status == "urgent":
+        row.escalation_status = "watch"
     db.add(row)
     db.commit()
     return {"status": "ok"}
+
+
+@router.post("/flag/{flag_id}/triage", dependencies=[Depends(admin_rate_limit)])
+def triage_flag(
+    flag_id: int,
+    payload: TriageFlagRequest,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_current_admin_user),
+) -> SafetyFlagItem:
+    row = db.get(SafetyFlag, flag_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Flag not found")
+
+    row.review_status = payload.review_status
+    row.escalation_status = payload.escalation_status
+    row.triage_notes = payload.triage_notes or None
+    row.reviewed_at = datetime.utcnow()
+    row.reviewer_user_id = admin_user.id
+    db.add(row)
+    db.commit()
+
+    return SafetyFlagItem(
+        id=row.id,
+        user_id=row.user_id,
+        trigger_type=row.trigger_type,
+        severity_score=row.severity_score,
+        escalation_status=row.escalation_status,
+        review_status=row.review_status,
+        triage_notes=row.triage_notes,
+        reviewed_at=row.reviewed_at,
+        reviewer_user_id=row.reviewer_user_id,
+        created_at=row.created_at,
+    )
+
+
+@router.get("/flags/analytics", response_model=SafetyFlagAnalyticsResponse, dependencies=[Depends(admin_rate_limit)])
+def flag_analytics(db: Session = Depends(get_db)) -> SafetyFlagAnalyticsResponse:
+    total_flags = int(db.scalar(select(func.count(SafetyFlag.id))) or 0)
+    avg_severity = float(db.scalar(select(func.avg(SafetyFlag.severity_score))) or 0.0)
+
+    review_rows = db.execute(
+        select(SafetyFlag.review_status, func.count(SafetyFlag.id)).group_by(SafetyFlag.review_status)
+    ).all()
+    escalation_rows = db.execute(
+        select(SafetyFlag.escalation_status, func.count(SafetyFlag.id)).group_by(SafetyFlag.escalation_status)
+    ).all()
+
+    by_review_status = [
+        SafetyFlagAnalyticsBucket(key=str(status), count=int(count or 0)) for status, count in review_rows
+    ]
+    by_escalation_status = [
+        SafetyFlagAnalyticsBucket(key=str(status), count=int(count or 0))
+        for status, count in escalation_rows
+    ]
+
+    return SafetyFlagAnalyticsResponse(
+        total_flags=total_flags,
+        avg_severity=round(avg_severity, 4),
+        by_review_status=by_review_status,
+        by_escalation_status=by_escalation_status,
+    )
 
 
 @router.get("/queue-health", response_model=QueueHealthResponse, dependencies=[Depends(admin_rate_limit)])

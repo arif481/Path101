@@ -19,6 +19,7 @@ import type {
   ResolveReviewStatus,
   SchedulerTickResponse,
   SafetyFlagItem,
+  SafetyFlagAnalyticsResponse,
   SessionCompleteResponse,
   UserAnalyticsResponse,
   WorkerEventItem,
@@ -252,6 +253,48 @@ export async function resolveSafetyFlag(
   if (!response.ok) {
     throw new Error("Resolve flag request failed");
   }
+}
+
+export async function triageSafetyFlag(
+  adminKey: string,
+  payload: {
+    flagId: number;
+    reviewStatus: "pending" | "in_review" | "resolved" | "dismissed";
+    escalationStatus: "none" | "watch" | "escalated" | "urgent";
+    triageNotes: string;
+  }
+): Promise<SafetyFlagItem> {
+  const response = await fetch(`${BASE_URL}/admin/flag/${payload.flagId}/triage`, {
+    method: "POST",
+    headers: {
+      ...adminHeaders(adminKey),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      review_status: payload.reviewStatus,
+      escalation_status: payload.escalationStatus,
+      triage_notes: payload.triageNotes,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Triage flag request failed");
+  }
+
+  return response.json() as Promise<SafetyFlagItem>;
+}
+
+export async function getSafetyFlagAnalytics(adminKey: string): Promise<SafetyFlagAnalyticsResponse> {
+  const response = await fetch(`${BASE_URL}/admin/flags/analytics`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Safety analytics request failed");
+  }
+
+  return response.json() as Promise<SafetyFlagAnalyticsResponse>;
 }
 
 export async function listWorkerEvents(adminKey: string, limit = 25): Promise<WorkerEventItem[]> {

@@ -48,13 +48,24 @@ def save_plan(db: Session, user_id: str, plan: PlanPreview) -> Plan:
     return plan_row
 
 
-def add_safety_flag(db: Session, user_id: str, raw_text: str, trigger_type: str = "crisis_language") -> SafetyFlag:
+def add_safety_flag(
+    db: Session,
+    user_id: str,
+    raw_text: str,
+    trigger_type: str = "crisis_language",
+    severity_score: int = 0,
+    escalation_status: str = "none",
+    triage_notes: str | None = None,
+) -> SafetyFlag:
     ensure_user(db, user_id)
     flag = SafetyFlag(
         user_id=user_id,
         trigger_type=trigger_type,
+        severity_score=severity_score,
+        escalation_status=escalation_status,
         raw_text_encrypted=raw_text,
         review_status="pending",
+        triage_notes=triage_notes,
     )
     db.add(flag)
     db.flush()

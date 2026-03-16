@@ -109,6 +109,8 @@ GitHub Actions runs both backend and frontend checks on push/PR to `main`.
 - `POST /session/{session_id}/complete`
 - `GET /admin/flags` (requires admin Bearer token)
 - `POST /admin/flag/{id}/resolve` (requires admin Bearer token)
+- `POST /admin/flag/{id}/triage` (requires admin Bearer token)
+- `GET /admin/flags/analytics` (requires admin Bearer token)
 - `GET /admin/queue-health` (requires admin Bearer token)
 - `GET /admin/notifications` (requires admin Bearer token)
 - `POST /admin/notifications/test-send` (requires admin Bearer token)
@@ -128,6 +130,7 @@ GitHub Actions runs both backend and frontend checks on push/PR to `main`.
 
 - Current storage is SQLAlchemy-backed (`sqlite` by default, PostgreSQL-ready via `DATABASE_URL`).
 - Crisis-like language triggers triage messaging and safety flag behavior stub.
+- Safety triage now includes severity scoring with escalation statuses (`none`, `watch`, `escalated`, `urgent`) and admin review lifecycle fields.
 - Next step is deeper analytics dashboards and notification delivery channels.
 
 ## Deploy (Render blueprint)

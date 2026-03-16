@@ -7,6 +7,7 @@ import {
   dropDeadLetterJobsBulk,
   getDeadLetterSummary,
   getActionAnalytics,
+  getSafetyFlagAnalytics,
   getUserAnalytics,
   authAnonymous,
   authLogin,
@@ -22,6 +23,7 @@ import {
   replayDeadLetterJobsBulk,
   purgeDeadLetterJobs,
   resolveSafetyFlag,
+  triageSafetyFlag,
   sendTestNotification,
   submitIntake,
   triggerSchedulerTick,
@@ -37,6 +39,7 @@ import type {
   AuthTokenResponse,
   IntakeResponse,
   QueueHealthResponse,
+  SafetyFlagAnalyticsResponse,
   SchedulerTickResponse,
   SafetyFlagItem,
   SessionCompleteResponse,
@@ -63,6 +66,7 @@ export function App() {
   const [sessionResult, setSessionResult] = useState<SessionCompleteResponse | null>(null);
   const [adminToken, setAdminToken] = useState("");
   const [flags, setFlags] = useState<SafetyFlagItem[]>([]);
+  const [flagAnalytics, setFlagAnalytics] = useState<SafetyFlagAnalyticsResponse | null>(null);
   const [queueHealth, setQueueHealth] = useState<QueueHealthResponse | null>(null);
   const [deadLetterJobs, setDeadLetterJobs] = useState<DeadLetterJobItem[]>([]);
   const [deadLetterReplays, setDeadLetterReplays] = useState<DeadLetterReplayAuditItem[]>([]);
@@ -86,6 +90,9 @@ export function App() {
   const [deadLetterReplayStatusFilter, setDeadLetterReplayStatusFilter] = useState("");
   const [deadLetterReplayAdminFilter, setDeadLetterReplayAdminFilter] = useState("");
   const [deadLetterReplayUserFilter, setDeadLetterReplayUserFilter] = useState("");
+  const [triageReviewStatus, setTriageReviewStatus] = useState<"pending" | "in_review" | "resolved" | "dismissed">("in_review");
+  const [triageEscalationStatus, setTriageEscalationStatus] = useState<"none" | "watch" | "escalated" | "urgent">("watch");
+  const [triageNotes, setTriageNotes] = useState("");
   const [workerEvents, setWorkerEvents] = useState<WorkerEventItem[]>([]);
   const [schedulerTick, setSchedulerTick] = useState<SchedulerTickResponse | null>(null);
   const [analyticsDays, setAnalyticsDays] = useState(30);
@@ -397,6 +404,24 @@ export function App() {
     }
   }
 
+  async function onLoadFlagAnalytics() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const analytics = await getSafetyFlagAnalytics(adminToken.trim());
+      setFlagAnalytics(analytics);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
   async function onResolveFlag(flagId: number, reviewStatus: "resolved" | "dismissed") {
     if (!adminToken.trim()) {
       setError("Admin token is required.");
@@ -408,6 +433,28 @@ export function App() {
     try {
       await resolveSafetyFlag(adminToken.trim(), flagId, reviewStatus);
       await onLoadFlags();
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+      setAdminLoading(false);
+    }
+  }
+
+  async function onTriageFlag(flagId: number) {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      await triageSafetyFlag(adminToken.trim(), {
+        flagId,
+        reviewStatus: triageReviewStatus,
+        escalationStatus: triageEscalationStatus,
+        triageNotes,
+      });
+      await Promise.all([onLoadFlags(), onLoadFlagAnalytics()]);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
       setAdminLoading(false);
@@ -1226,13 +1273,58 @@ export function App() {
             {adminLoading ? "Loading..." : "Load Safety Flags"}
           </button>
 
+          <button type="button" onClick={onLoadFlagAnalytics} disabled={adminLoading}>
+            {adminLoading ? "Loading..." : "Load Safety Analytics"}
+          </button>
+
+          <label>
+            Triage Review Status
+            <select
+              value={triageReviewStatus}
+              onChange={(event) =>
+                setTriageReviewStatus(
+                  event.target.value as "pending" | "in_review" | "resolved" | "dismissed"
+                )
+              }
+            >
+              <option value="pending">pending</option>
+              <option value="in_review">in_review</option>
+              <option value="resolved">resolved</option>
+              <option value="dismissed">dismissed</option>
+            </select>
+          </label>
+
+          <label>
+            Triage Escalation Status
+            <select
+              value={triageEscalationStatus}
+              onChange={(event) =>
+                setTriageEscalationStatus(
+                  event.target.value as "none" | "watch" | "escalated" | "urgent"
+                )
+              }
+            >
+              <option value="none">none</option>
+              <option value="watch">watch</option>
+              <option value="escalated">escalated</option>
+              <option value="urgent">urgent</option>
+            </select>
+          </label>
+
+          <label>
+            Triage Notes
+            <textarea value={triageNotes} onChange={(event) => setTriageNotes(event.target.value)} rows={2} />
+          </label>
+
           {flags.length === 0 ? (
             <p className="subtle">No flags for this filter.</p>
           ) : (
             <ul>
               {flags.map((flag) => (
                 <li key={flag.id} className="top-gap">
-                  <strong>#{flag.id}</strong> {flag.trigger_type} • {flag.review_status} • {flag.user_id}
+                  <strong>#{flag.id}</strong> {flag.trigger_type} • severity: {flag.severity_score} • escalation: {flag.escalation_status} • {flag.review_status} • {flag.user_id}
+                  {flag.triage_notes ? ` • notes: ${flag.triage_notes}` : ""}
+                  {flag.reviewer_user_id ? ` • reviewer: ${flag.reviewer_user_id}` : ""}
                   <div className="stack top-gap">
                     <button
                       type="button"
@@ -1248,10 +1340,41 @@ export function App() {
                     >
                       Mark Dismissed
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => onTriageFlag(flag.id)}
+                      disabled={adminLoading}
+                    >
+                      Apply Triage Update
+                    </button>
                   </div>
                 </li>
               ))}
             </ul>
+          )}
+
+          {flagAnalytics && (
+            <div className="top-gap">
+              <p>
+                Safety analytics — total: {flagAnalytics.total_flags} • avg severity: {flagAnalytics.avg_severity.toFixed(2)}
+              </p>
+              <p className="subtle">By review status:</p>
+              <ul>
+                {flagAnalytics.by_review_status.map((item) => (
+                  <li key={`status-${item.key}`}>
+                    {item.key}: {item.count}
+                  </li>
+                ))}
+              </ul>
+              <p className="subtle">By escalation status:</p>
+              <ul>
+                {flagAnalytics.by_escalation_status.map((item) => (
+                  <li key={`escalation-${item.key}`}>
+                    {item.key}: {item.count}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
 
           <button type="button" onClick={onLoadWorkerEvents} disabled={adminLoading}>
