@@ -2,103 +2,110 @@
 
 # 🧭 Path101
 
-**Behavior-change micro-intervention platform for students**
+**AI-powered personal growth companion for students**
 
-An evidence-based system that helps students overcome procrastination, anxiety, and poor study habits through personalized micro-sessions, adaptive recommendations, and real-time safety monitoring.
-
-[![CI](https://github.com/arif481/Path101/actions/workflows/ci.yml/badge.svg)](https://github.com/arif481/Path101/actions)
-[![Firebase](https://img.shields.io/badge/Firebase-Spark%20Plan-FFCA28?logo=firebase&logoColor=black)](https://firebase.google.com)
+[![CI](https://github.com/arif481/Path101/actions/workflows/ci.yml/badge.svg)](https://github.com/arif481/Path101/actions/workflows/ci.yml)
+[![Firebase](https://img.shields.io/badge/Powered%20by-Firebase-FFCA28?logo=firebase)](https://firebase.google.com)
+[![Gemini](https://img.shields.io/badge/Gemini%202.0-Flash-4285F4?logo=google)](https://aistudio.google.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?logo=typescript)](https://www.typescriptlang.org)
+
+**[Live App →](https://path101.web.app)**
 
 </div>
 
 ---
 
-## ✨ Features
+## What is Path101?
+
+Path101 is an **AI-first behavior-change platform** that helps students overcome procrastination, anxiety, and poor study habits through personalized micro-sessions powered by **Google Gemini AI**.
+
+Unlike template-based apps, **everything is generated dynamically** based on what you tell it. No pre-made plans, no generic advice — just real, personalized guidance.
+
+### How it works
+
+```
+You share what's going on
+        ↓
+🧠 AI deeply analyzes your concerns, emotional state, and severity
+        ↓
+📋 Generates a fully personalized multi-week plan with specific sessions
+        ↓
+🏃 Guides you through each session step with real-time AI coaching
+        ↓
+🪞 Provides personalized reflection, mood interpretation, and journal prompts
+        ↓
+📊 Tracks your progress and gives AI-powered insights over time
+```
+
+### Features
 
 | Feature | Description |
 |---|---|
-| 🎯 **Smart Intake** | NLP keyword classification maps free-text concerns to evidence-based BCT modules |
-| 🧠 **Adaptive Bandit** | Epsilon-greedy multi-armed bandit learns which session type works best per user |
-| 🛡️ **Safety Triage** | Real-time crisis language detection with severity scoring and admin escalation |
-| 📊 **Admin Dashboard** | Full RBAC-protected panel for safety flags, dead-letter queue, analytics, and notifications |
-| ⏰ **Session Nudges** | Automated reminders via GitHub Actions cron with distributed dedup locks |
-| 📱 **Responsive UI** | React + TypeScript SPA with anonymous and email auth |
+| 🧠 **AI Analysis** | Gemini understands your concerns, emotional state, and severity |
+| 📋 **Dynamic Plans** | Every plan is unique — generated from your specific situation |
+| 🏃 **Guided Sessions** | Step-by-step AI coaching during each micro-session |
+| 🪞 **AI Reflections** | Personalized insights, mood interpretation, and journal prompts |
+| 📊 **Progress Tracking** | AI-analyzed trends, strengths, and focus areas |
+| 💬 **AI Chat** | Talk to Path101 anytime for advice and support |
+| 🛡️ **Safety Detection** | Crisis language triggers immediate safety resources |
+| 🔐 **Auth** | Google, email/password, or anonymous sign-in |
 
-## 🏗️ Architecture
+---
+
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                   Browser (React)                │
+│              Browser (React + TypeScript)        │
 │                                                  │
-│  ┌─────────┐  ┌──────────┐  ┌───────────────┐   │
-│  │Firebase  │  │ Intake   │  │ Bandit Policy │   │
-│  │Auth SDK  │  │ Service  │  │ (ε-greedy)    │   │
-│  └────┬─────┘  └────┬─────┘  └──────┬────────┘   │
-│       │              │               │            │
-│  ┌────▼──────────────▼───────────────▼────────┐   │
-│  │         Firestore SDK (reads/writes)       │   │
-│  └────────────────────┬───────────────────────┘   │
-└───────────────────────┼───────────────────────────┘
-                        │
-              ┌─────────▼─────────┐
-              │  Cloud Firestore  │   ← Spark Plan (free)
-              │  Firebase Auth    │   ← 50K MAU free
-              └───────────────────┘
-                        ▲
-              ┌─────────┴─────────┐
-              │  GitHub Actions   │   ← Scheduler cron
-              │  (scheduler-tick) │     (free)
-              └───────────────────┘
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
+│  │ Firebase  │  │ Gemini   │  │  Firestore   │  │
+│  │   Auth    │  │ 2.0 Flash│  │  (Database)  │  │
+│  └──────────┘  └──────────┘  └──────────────┘  │
+└─────────────────────────────────────────────────┘
 ```
 
-**Zero server cost** — all business logic runs client-side. Firebase Spark plan (no credit card needed).
+**100% client-side** — no backend server. All AI calls go directly to Gemini API. All data persists in Firestore with security rules.
 
-## 📁 Project Structure
+**Cost: $0/month** (Firebase Spark plan + Gemini free tier)
+
+---
+
+## Project Structure
 
 ```
 Path101/
-├── frontend/                    # React + TypeScript SPA
+├── frontend/                 # React + TypeScript + Vite
 │   └── src/
-│       ├── firebase/
-│       │   ├── config.ts        # Firebase SDK init + emulator support
-│       │   ├── authService.ts   # Auth (anon, email, password reset)
-│       │   ├── useAuth.ts       # React auth hook
-│       │   ├── firebaseApi.ts   # API layer (feature-flag switchable)
-│       │   └── services/
-│       │       ├── intakeService.ts   # Keyword classification + plan gen
-│       │       ├── banditService.ts   # ε-greedy recommendation engine
-│       │       ├── safetyService.ts   # Crisis language detection
-│       │       ├── firestoreOps.ts    # Firestore CRUD for all collections
-│       │       └── adminService.ts    # Admin panel operations
-│       ├── api.ts               # Legacy REST API layer
-│       └── types.ts             # TypeScript interfaces
-├── backend/                     # FastAPI (legacy, still functional)
-│   ├── app/
-│   │   ├── main.py              # FastAPI entry point
-│   │   ├── routers/             # REST endpoints
-│   │   ├── services/            # Business logic (Python)
-│   │   └── models/              # SQLAlchemy ORM models
-│   └── tests/                   # pytest test suite (7 files)
+│       ├── App.tsx           # Main app (7 AI-driven views)
+│       ├── styles.css        # Premium dark-mode design system
+│       └── firebase/
+│           ├── config.ts     # Firebase initialization
+│           ├── authService.ts # Auth (Google, email, anonymous)
+│           ├── useAuth.ts    # React auth hook
+│           └── services/
+│               ├── aiService.ts       # 🧠 Gemini AI core engine
+│               ├── firestoreOps.ts    # Database operations
+│               ├── safetyService.ts   # Crisis detection
+│               ├── intakeService.ts   # Intake helpers
+│               ├── banditService.ts   # Recommendation engine
+│               └── adminService.ts    # Admin operations
 ├── firebase/
-│   ├── firebase.json            # Hosting + Firestore config
-│   ├── firestore.rules          # Security rules (RBAC)
-│   └── firestore.indexes.json   # Composite query indexes
-├── scripts/
-│   └── scheduler-tick.ts        # GitHub Actions nudge scanner
-└── .github/workflows/
-    └── scheduler-tick.yml       # Cron job (every 15 min)
+│   ├── firestore.rules       # Security rules (13 collections)
+│   └── firestore.indexes.json
+├── .github/workflows/
+│   ├── ci.yml                # CI: test + build
+│   └── scheduler-tick.yml    # Cron scheduler (optional)
+└── scripts/
+    └── scheduler-tick.ts     # Nudge scheduler (GitHub Actions)
 ```
 
-## 🚀 Quick Start
+---
 
-### Prerequisites
+## Quick Start
 
-- [Node.js](https://nodejs.org) 18+
-- A [Firebase project](https://console.firebase.google.com) (free Spark plan)
-
-### 1. Clone & Install
+### 1. Clone & install
 
 ```bash
 git clone https://github.com/arif481/Path101.git
@@ -106,92 +113,50 @@ cd Path101/frontend
 npm install
 ```
 
-### 2. Configure Firebase
+### 2. Configure environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your Firebase project config:
+Fill in your keys:
 
 ```env
-VITE_FIREBASE_API_KEY=your-api-key
-VITE_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=your-project-id
-VITE_FIREBASE_STORAGE_BUCKET=your-project.appspot.com
-VITE_FIREBASE_MESSAGING_SENDER_ID=123456789
-VITE_FIREBASE_APP_ID=1:123456789:web:abc123
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+VITE_FIREBASE_STORAGE_BUCKET=...
+VITE_FIREBASE_MESSAGING_SENDER_ID=...
+VITE_FIREBASE_APP_ID=...
+VITE_GEMINI_API_KEY=...       # Free from aistudio.google.com
 VITE_USE_FIREBASE=true
 ```
 
-### 3. Firebase Setup
-
-In the [Firebase Console](https://console.firebase.google.com):
-
-1. **Authentication** → Enable **Email/Password** and **Anonymous** sign-in
-2. **Firestore** → Create database in **production mode**
-
-Deploy security rules and indexes:
+### 3. Run locally
 
 ```bash
-npm install -g firebase-tools
-firebase login
-cd firebase && firebase deploy --only firestore
-```
-
-### 4. Run Locally
-
-```bash
-cd frontend
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173)
-
-### 5. Deploy
+### 4. Deploy
 
 ```bash
-cd frontend && npm run build
+npm run build
+cp -r dist ../firebase/public
 cd ../firebase && firebase deploy --only hosting
 ```
 
-## 🧪 Testing
+---
 
-```bash
-# Frontend
-cd frontend && npm test
+## Security
 
-# Legacy backend (still works)
-cd backend && python -m pytest tests/ -q
-```
+- **Firestore Rules** — 13 collections with owner-based access control
+- **Auth** — Firebase Auth SDK (Google, email/password, anonymous)
+- **API Keys** — All sensitive keys stored in GitHub Secrets and `.env` (gitignored)
+- **Safety** — AI-powered crisis detection with safety escalation pipeline
 
-## 🔒 Security Model
+---
 
-| Collection | User Access | Admin Access |
-|---|---|---|
-| `users/{uid}` | Own data only | Full |
-| `plans/{planId}` | Own plans only | Full |
-| `sessions/{sid}` | Own sessions only | Full |
-| `safetyFlags` | Create only | Full CRUD |
-| `deadLetterJobs` | — | Full CRUD |
-| `notificationLogs` | Own notifications | Full |
-| `workerMetrics` | — | Read only |
+## License
 
-Admin access is granted via Firebase Auth custom claims:
-
-```bash
-firebase auth:set-custom-user-claims <UID> '{"admin": true}'
-```
-
-## 🔄 Feature Flag
-
-The app supports dual-mode operation via environment variable:
-
-| `VITE_USE_FIREBASE` | Behavior |
-|---|---|
-| `true` | All operations use Firebase (Firestore + Auth) |
-| `false` | Falls back to legacy REST API backend |
-
-## 📄 License
-
-This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
+MIT © [arif481](https://github.com/arif481)
