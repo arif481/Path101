@@ -1,2125 +1,508 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useAuth } from "./firebase/useAuth";
+import { compilePlan, computeReward, type PlanPreview } from "./firebase/services/intakeService";
+import { evaluateSafetyText } from "./firebase/services/safetyService";
+import { selectNextRecommendation, type BanditResult } from "./firebase/services/banditService";
 import {
-  downloadNotificationAnalyticsCsv,
-  downloadDeadLetterReplaysCsv,
-  downloadActionAnalyticsCsv,
-  downloadUserAnalyticsCsv,
-  dropDeadLetterJob,
-  dropDeadLetterJobsBulk,
-  getDeadLetterSummary,
-  getActionAnalytics,
-  getSafetyFlagAnalytics,
-  getUserAnalytics,
-  authAnonymous,
-  authLogin,
-  authLogout,
-  authRefresh,
-  authMe,
-  authRegister,
-  confirmPasswordReset,
-  completeSession,
-  getAdminQueueHealth,
-  getNotificationAnalytics,
-  getWorkerMetrics,
-  listSafetyFlags,
-  listDeadLetterJobs,
-  listDeadLetterReplays,
-  listWorkerEvents,
-  replayDeadLetterJob,
-  replayDeadLetterJobsBulk,
-  purgeDeadLetterJobs,
-  resolveSafetyFlag,
-  triageSafetyFlag,
-  sendTestNotification,
-  submitIntake,
-  triggerSchedulerTick,
-  listNotificationLogs,
-  requestPasswordReset,
-  runRetentionMaintenance,
-} from "./api";
-import type {
-  BanditAnalyticsResponse,
-  DeadLetterReplayAuditItem,
-  DeadLetterJobItem,
-  DeadLetterSummaryResponse,
-  NotificationLogItem,
-  NotificationAnalyticsResponse,
-  RetentionMaintenanceResponse,
-  AnonymousAuthResponse,
-  AuthTokenResponse,
-  IntakeResponse,
-  QueueHealthResponse,
-  SafetyFlagAnalyticsResponse,
-  SchedulerTickResponse,
-  SafetyFlagItem,
-  SessionCompleteResponse,
-  UserAnalyticsResponse,
-  WorkerMetricsResponse,
-  WorkerEventItem,
-} from "./types";
+  savePlan,
+  addSafetyFlag,
+  createSafetyEscalationEvent,
+  completeSession as firestoreCompleteSession,
+  addBanditLog,
+  enqueueTask,
+} from "./firebase/services/firestoreOps";
 
-const TOKEN_KEY = "path101.token";
-const REFRESH_TOKEN_KEY = "path101.refresh_token";
-const USER_KEY = "path101.user";
-const ANON_KEY = "path101.anonymous";
-const ADMIN_POLL_KEY = "path101.admin.poll_mode";
-const ADMIN_FLAG_FILTER_KEY = "path101.admin.flag_filter";
+/* ── Google logo SVG ───────────────────────────────── */
 
-export function App() {
-  const [authToken, setAuthToken] = useState<string | null>(null);
-  const [refreshToken, setRefreshToken] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [anonymous, setAnonymous] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+function GoogleLogo() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18">
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+    </svg>
+  );
+}
+
+/* ── Auth screen ───────────────────────────────────── */
+
+function AuthScreen({
+  onAnonymous,
+  onGoogle,
+  onEmailAuth,
+  loading,
+  error,
+}: {
+  onAnonymous: () => void;
+  onGoogle: () => void;
+  onEmailAuth: (email: string, password: string, isRegister: boolean) => void;
+  loading: boolean;
+  error: string | null;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [isRegister, setIsRegister] = useState(false);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    onEmailAuth(email, password, isRegister);
+  }
+
+  return (
+    <div className="auth-container">
+      <div className="auth-card">
+        <div className="auth-brand">
+          <div className="logo">🧭</div>
+          <h1>Path101</h1>
+          <p>Your personal behavior-change companion</p>
+        </div>
+
+        {error && <div className="alert alert-error">⚠️ {error}</div>}
+
+        <button className="btn btn-google btn-block" onClick={onGoogle} disabled={loading}>
+          <GoogleLogo />
+          Continue with Google
+        </button>
+
+        <div className="auth-divider">or</div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label className="form-label">Email</label>
+            <input
+              className="form-input"
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Password</label>
+            <input
+              className="form-input"
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={6}
+            />
+          </div>
+          <button className="btn btn-primary btn-block" type="submit" disabled={loading}>
+            {loading && <span className="spinner" />}
+            {isRegister ? "Create Account" : "Sign In"}
+          </button>
+        </form>
+
+        <div className="auth-footer">
+          {isRegister ? (
+            <p>Already have an account?{" "}<a onClick={() => setIsRegister(false)}>Sign in</a></p>
+          ) : (
+            <p>Don&apos;t have an account?{" "}<a onClick={() => setIsRegister(true)}>Create one</a></p>
+          )}
+        </div>
+
+        <div className="auth-divider">or</div>
+
+        <button className="btn btn-secondary btn-block btn-sm" onClick={onAnonymous} disabled={loading}>
+          👤 Continue anonymously
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Plan Preview card ─────────────────────────────── */
+
+function PlanPreviewCard({ plan, smartGoal, safetyTriggered, triageMessage }: {
+  plan: PlanPreview;
+  smartGoal: string;
+  safetyTriggered: boolean;
+  triageMessage: string | null;
+}) {
+  const session = plan.nextSession;
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="icon purple">📋</div>
+        <div>
+          <div className="card-title">Your Plan</div>
+          <div className="card-subtitle">Week {plan.currentWeek} of {plan.durationWeeks}</div>
+        </div>
+      </div>
+
+      {safetyTriggered && triageMessage && (
+        <div className="safety-banner">
+          <p>🛡️ {triageMessage}</p>
+        </div>
+      )}
+
+      <div className="smart-goal">💡 {smartGoal}</div>
+
+      <div className="pill-row">
+        {plan.modules.map((mod) => (
+          <span key={mod} className="pill">{mod.replace(/_/g, " ")}</span>
+        ))}
+      </div>
+
+      <div className="plan-grid">
+        <div className="plan-stat">
+          <div className="label">Next Session</div>
+          <div className="value">{session.title}</div>
+        </div>
+        <div className="plan-stat">
+          <div className="label">Duration</div>
+          <div className="value">{session.durationMins} min</div>
+        </div>
+        <div className="plan-stat">
+          <div className="label">Difficulty</div>
+          <div className="value">
+            <span className={`badge badge-${session.difficulty === "low" ? "green" : session.difficulty === "medium" ? "yellow" : "red"}`}>
+              {session.difficulty}
+            </span>
+          </div>
+        </div>
+        <div className="plan-stat">
+          <div className="label">Metrics</div>
+          <div className="value" style={{ fontSize: 13 }}>
+            {session.expectedMetrics.join(", ")}
+          </div>
+        </div>
+      </div>
+
+      <div className="session-steps">
+        {session.steps.map((step, i) => (
+          <div key={i} className="step-item">
+            <div className="step-number">{i + 1}</div>
+            <div className="step-title">{step.title}</div>
+            <div className="step-duration">{step.durationMins}m</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Session Completion + Reward ───────────────────── */
+
+function RewardCard({ result }: { result: BanditResult & { reward: number } }) {
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="icon green">🏆</div>
+        <div>
+          <div className="card-title">Session Complete!</div>
+          <div className="card-subtitle">Here's your reward and next recommendation</div>
+        </div>
+      </div>
+
+      <div className="reward-display">
+        <div>
+          <div className="reward-label">Reward Score</div>
+          <div className="reward-score">{result.reward.toFixed(2)}</div>
+        </div>
+        <div className="reward-rationale">{result.rationale}</div>
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 8 }}>NEXT RECOMMENDATION</p>
+        <div className="step-item">
+          <div className="step-number">→</div>
+          <div className="step-title">{result.plan.title}</div>
+          <div className="step-duration">{result.plan.durationMins}m</div>
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <span className={`badge badge-${result.plan.difficulty === "low" ? "green" : result.plan.difficulty === "medium" ? "yellow" : "red"}`}>
+            {result.plan.difficulty}
+          </span>
+          <span className="badge badge-purple" style={{ marginLeft: 6 }}>{result.policyVersion}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Main App ──────────────────────────────────────── */
+
+export function App() {
+  const auth = useAuth();
+  const [view, setView] = useState<"intake" | "complete">("intake");
   const [text, setText] = useState("");
   const [availableTimes, setAvailableTimes] = useState("7-9pm weekdays");
-  const [intakeResult, setIntakeResult] = useState<IntakeResponse | null>(null);
-  const [sessionResult, setSessionResult] = useState<SessionCompleteResponse | null>(null);
-  const [adminToken, setAdminToken] = useState("");
-  const [flags, setFlags] = useState<SafetyFlagItem[]>([]);
-  const [flagAnalytics, setFlagAnalytics] = useState<SafetyFlagAnalyticsResponse | null>(null);
-  const [queueHealth, setQueueHealth] = useState<QueueHealthResponse | null>(null);
-  const [deadLetterJobs, setDeadLetterJobs] = useState<DeadLetterJobItem[]>([]);
-  const [deadLetterReplays, setDeadLetterReplays] = useState<DeadLetterReplayAuditItem[]>([]);
-  const [deadLetterSummary, setDeadLetterSummary] = useState<DeadLetterSummaryResponse | null>(null);
-  const [purgeOlderThanDays, setPurgeOlderThanDays] = useState(30);
-  const [purgeLimit, setPurgeLimit] = useState(500);
-  const [notificationLogs, setNotificationLogs] = useState<NotificationLogItem[]>([]);
-  const [notificationAnalytics, setNotificationAnalytics] = useState<NotificationAnalyticsResponse | null>(null);
-  const [workerMetrics, setWorkerMetrics] = useState<WorkerMetricsResponse | null>(null);
-  const [retentionResult, setRetentionResult] = useState<RetentionMaintenanceResponse | null>(null);
-  const [retentionDays, setRetentionDays] = useState(90);
-  const [deleteOldBanditLogs, setDeleteOldBanditLogs] = useState(false);
-  const [passwordResetToken, setPasswordResetToken] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [notificationOffset, setNotificationOffset] = useState(0);
-  const [notificationUserFilter, setNotificationUserFilter] = useState("");
-  const [notificationChannelFilter, setNotificationChannelFilter] = useState("");
-  const [notificationStatusFilter, setNotificationStatusFilter] = useState("");
-  const [notificationSendUserId, setNotificationSendUserId] = useState("");
-  const [notificationSendChannel, setNotificationSendChannel] = useState("in_app");
-  const [notificationSendMessage, setNotificationSendMessage] = useState("Path101 test notification");
-  const [selectedDeadLetterIds, setSelectedDeadLetterIds] = useState<string[]>([]);
-  const [deadLetterOffset, setDeadLetterOffset] = useState(0);
-  const [deadLetterReplayOffset, setDeadLetterReplayOffset] = useState(0);
-  const [deadLetterJobTypeFilter, setDeadLetterJobTypeFilter] = useState("");
-  const [deadLetterUserFilter, setDeadLetterUserFilter] = useState("");
-  const [deadLetterReasonFilter, setDeadLetterReasonFilter] = useState("");
-  const [deadLetterReplayStatusFilter, setDeadLetterReplayStatusFilter] = useState("");
-  const [deadLetterReplayAdminFilter, setDeadLetterReplayAdminFilter] = useState("");
-  const [deadLetterReplayUserFilter, setDeadLetterReplayUserFilter] = useState("");
-  const [triageReviewStatus, setTriageReviewStatus] = useState<"pending" | "in_review" | "resolved" | "dismissed">("in_review");
-  const [triageEscalationStatus, setTriageEscalationStatus] = useState<"none" | "watch" | "escalated" | "urgent">("watch");
-  const [triageNotes, setTriageNotes] = useState("");
-  const [workerEvents, setWorkerEvents] = useState<WorkerEventItem[]>([]);
-  const [schedulerTick, setSchedulerTick] = useState<SchedulerTickResponse | null>(null);
-  const [analyticsDays, setAnalyticsDays] = useState(30);
-  const [analyticsResult, setAnalyticsResult] = useState<BanditAnalyticsResponse | null>(null);
-  const [userAnalyticsResult, setUserAnalyticsResult] = useState<UserAnalyticsResponse | null>(null);
-  const [pollMode, setPollMode] = useState(false);
-  const [flagFilter, setFlagFilter] = useState("pending");
-  const [adminLoading, setAdminLoading] = useState(false);
   const [preMood, setPreMood] = useState(5);
   const [postMood, setPostMood] = useState(6);
   const [feedback, setFeedback] = useState("");
+  const [plan, setPlan] = useState<PlanPreview | null>(null);
+  const [smartGoal, setSmartGoal] = useState("");
+  const [safetyTriggered, setSafetyTriggered] = useState(false);
+  const [triageMessage, setTriageMessage] = useState<string | null>(null);
+  const [sessionResult, setSessionResult] = useState<(BanditResult & { reward: number }) | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const storedToken = localStorage.getItem(TOKEN_KEY);
-    const storedRefreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-    const storedUser = localStorage.getItem(USER_KEY);
-    const storedAnon = localStorage.getItem(ANON_KEY);
-    const storedPollMode = localStorage.getItem(ADMIN_POLL_KEY);
-    const storedFlagFilter = localStorage.getItem(ADMIN_FLAG_FILTER_KEY);
+  // ── Auth handlers ─────────────────────────────────
 
-    if (!storedToken || !storedUser) {
-      return;
-    }
-
-    setAuthToken(storedToken);
-    setRefreshToken(storedRefreshToken);
-    setAdminToken(storedToken);
-    setUserId(storedUser);
-    setAnonymous(storedAnon === "true");
-
-    if (storedPollMode === "true") {
-      setPollMode(true);
-    }
-
-    if (storedFlagFilter && ["all", "pending", "resolved", "dismissed"].includes(storedFlagFilter)) {
-      setFlagFilter(storedFlagFilter);
-    }
-
-    void authMe(storedToken)
-      .then((me) => {
-        setIsAdmin(me.is_admin);
-      })
-      .catch(async () => {
-        if (!storedRefreshToken) {
-          clearSession();
-          return;
-        }
-
-        try {
-          const refreshed = await authRefresh(storedRefreshToken);
-          persistSession(refreshed);
-        } catch {
-          clearSession();
-        }
-      });
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem(ADMIN_POLL_KEY, String(pollMode));
-  }, [pollMode]);
-
-  useEffect(() => {
-    localStorage.setItem(ADMIN_FLAG_FILTER_KEY, flagFilter);
-  }, [flagFilter]);
-
-  useEffect(() => {
-    if (!pollMode) {
-      return;
-    }
-
-    const key = adminToken.trim();
-    if (!key) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      void Promise.all([
-        listWorkerEvents(key, 25),
-        getAdminQueueHealth(key),
-        listDeadLetterJobs(key, {
-          limit: 25,
-          offset: deadLetterOffset,
-          jobType: deadLetterJobTypeFilter.trim(),
-          userId: deadLetterUserFilter.trim(),
-          reason: deadLetterReasonFilter.trim(),
-        }),
-        listDeadLetterReplays(key, {
-          limit: 25,
-          offset: deadLetterReplayOffset,
-          replayStatus: deadLetterReplayStatusFilter.trim(),
-          adminUserId: deadLetterReplayAdminFilter.trim(),
-          jobUserId: deadLetterReplayUserFilter.trim(),
-        }),
-        listNotificationLogs(key, {
-          limit: 25,
-          offset: notificationOffset,
-          userId: notificationUserFilter.trim(),
-          channel: notificationChannelFilter.trim(),
-          status: notificationStatusFilter.trim(),
-        }),
-      ])
-        .then(([events, health, deadLetters, replayAudits, notifications]) => {
-          setWorkerEvents(events);
-          setQueueHealth(health);
-          setDeadLetterJobs(deadLetters);
-          setDeadLetterReplays(replayAudits);
-          setNotificationLogs(notifications);
-        })
-        .catch(() => {
-          setPollMode(false);
-        });
-    }, 12000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [
-    pollMode,
-    adminToken,
-    deadLetterOffset,
-    deadLetterReplayOffset,
-    deadLetterJobTypeFilter,
-    deadLetterUserFilter,
-    deadLetterReasonFilter,
-    deadLetterReplayStatusFilter,
-    deadLetterReplayAdminFilter,
-    deadLetterReplayUserFilter,
-    notificationOffset,
-    notificationUserFilter,
-    notificationChannelFilter,
-    notificationStatusFilter,
-  ]);
-
-  function persistSession(result: AuthTokenResponse | AnonymousAuthResponse) {
-    setAuthToken(result.access_token);
-    setRefreshToken(result.refresh_token);
-    setAdminToken(result.access_token);
-    setUserId(result.user_id);
-    setAnonymous(result.anonymous);
-    setIsAdmin(result.is_admin);
-    localStorage.setItem(TOKEN_KEY, result.access_token);
-    if (result.refresh_token) {
-      localStorage.setItem(REFRESH_TOKEN_KEY, result.refresh_token);
-    }
-    localStorage.setItem(USER_KEY, result.user_id);
-    localStorage.setItem(ANON_KEY, String(result.anonymous));
+  async function handleAnonymous() {
+    setError(null);
+    try { await auth.signInAnonymous(); } catch (e) { setError((e as Error).message); }
   }
 
-  function clearSession() {
-    setAuthToken(null);
-    setRefreshToken(null);
-    setAdminToken("");
-    setUserId(null);
-    setAnonymous(false);
-    setIsAdmin(false);
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    localStorage.removeItem(ANON_KEY);
+  async function handleGoogle() {
+    setError(null);
+    try { await auth.signInWithGoogle(); } catch (e) { setError((e as Error).message); }
   }
 
-  async function onSignOut() {
-    if (refreshToken) {
-      try {
-        await authLogout(refreshToken);
-      } catch {
-      }
-    }
-    clearSession();
-  }
-
-  async function loadDeadLetterJobsForAdmin(key: string) {
-    const jobs = await listDeadLetterJobs(key, {
-      limit: 25,
-      offset: deadLetterOffset,
-      jobType: deadLetterJobTypeFilter.trim(),
-      userId: deadLetterUserFilter.trim(),
-      reason: deadLetterReasonFilter.trim(),
-    });
-    setDeadLetterJobs(jobs);
-    setSelectedDeadLetterIds((previous) => previous.filter((id) => jobs.some((item) => item.dead_letter_id === id)));
-  }
-
-  async function loadDeadLetterReplaysForAdmin(key: string) {
-    const replayAudits = await listDeadLetterReplays(key, {
-      limit: 25,
-      offset: deadLetterReplayOffset,
-      replayStatus: deadLetterReplayStatusFilter.trim(),
-      adminUserId: deadLetterReplayAdminFilter.trim(),
-      jobUserId: deadLetterReplayUserFilter.trim(),
-    });
-    setDeadLetterReplays(replayAudits);
-  }
-
-  async function loadNotificationLogsForAdmin(key: string) {
-    const notifications = await listNotificationLogs(key, {
-      limit: 25,
-      offset: notificationOffset,
-      userId: notificationUserFilter.trim(),
-      channel: notificationChannelFilter.trim(),
-      status: notificationStatusFilter.trim(),
-    });
-    setNotificationLogs(notifications);
-  }
-
-  async function onAnonymousSignIn() {
-    setLoading(true);
+  async function handleEmailAuth(email: string, password: string, isRegister: boolean) {
     setError(null);
     try {
-      const result = await authAnonymous();
-      persistSession(result);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
+      if (isRegister) { await auth.signUp(email, password); }
+      else { await auth.signIn(email, password); }
+    } catch (e) { setError((e as Error).message); }
   }
 
-  async function onRegister(event: React.FormEvent) {
-    event.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await authRegister(email, password);
-      persistSession(result);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
+  // ── Show auth screen if not logged in ─────────────
+
+  if (!auth.user) {
+    return (
+      <AuthScreen
+        onAnonymous={handleAnonymous}
+        onGoogle={handleGoogle}
+        onEmailAuth={handleEmailAuth}
+        loading={auth.loading}
+        error={error}
+      />
+    );
   }
 
-  async function onLogin(event: React.FormEvent) {
-    event.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await authLogin(email, password);
-      persistSession(result);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }
+  // ── Intake handler ────────────────────────────────
 
-  async function onSubmitIntake(event: React.FormEvent) {
-    event.preventDefault();
-    if (!userId) {
-      setError("Sign in first to create a plan.");
-      return;
-    }
-
+  async function handleIntake(e: React.FormEvent) {
+    e.preventDefault();
+    if (!auth.user) return;
     setLoading(true);
     setError(null);
     setSessionResult(null);
 
     try {
-      const payload = {
-        user_id: userId,
-        text,
-        available_times: availableTimes
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean),
-        preferences: { modality: "text" },
-      };
-
-      const result = await submitIntake(payload);
-      setIntakeResult(result);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function onCompleteSession(event: React.FormEvent) {
-    event.preventDefault();
-    if (!intakeResult) {
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await completeSession(
-        intakeResult.plan_preview.next_session.session_id,
-        preMood,
-        postMood,
-        feedback
-      );
-      setSessionResult(response);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function onLoadQueueHealth() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const health = await getAdminQueueHealth(adminToken.trim());
-      setQueueHealth(health);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onLoadFlags() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const result = await listSafetyFlags(adminToken.trim(), flagFilter);
-      setFlags(result);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onLoadFlagAnalytics() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const analytics = await getSafetyFlagAnalytics(adminToken.trim());
-      setFlagAnalytics(analytics);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onResolveFlag(flagId: number, reviewStatus: "resolved" | "dismissed") {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      await resolveSafetyFlag(adminToken.trim(), flagId, reviewStatus);
-      await onLoadFlags();
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-      setAdminLoading(false);
-    }
-  }
-
-  async function onTriageFlag(flagId: number) {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      await triageSafetyFlag(adminToken.trim(), {
-        flagId,
-        reviewStatus: triageReviewStatus,
-        escalationStatus: triageEscalationStatus,
-        triageNotes,
-      });
-      await Promise.all([onLoadFlags(), onLoadFlagAnalytics()]);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-      setAdminLoading(false);
-    }
-  }
-
-  async function onLoadWorkerEvents() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const events = await listWorkerEvents(adminToken.trim(), 25);
-      setWorkerEvents(events);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onLoadDeadLetterJobs() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      await loadDeadLetterJobsForAdmin(adminToken.trim());
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onReplayDeadLetter(deadLetterId: string) {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    const key = adminToken.trim()
-    setAdminLoading(true);
-    setError(null);
-    try {
-      await replayDeadLetterJob(key, deadLetterId);
-      const [health] = await Promise.all([
-        getAdminQueueHealth(key),
-        loadDeadLetterJobsForAdmin(key),
-        loadDeadLetterReplaysForAdmin(key),
-      ]);
-      setQueueHealth(health);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  function onToggleDeadLetterSelection(deadLetterId: string) {
-    setSelectedDeadLetterIds((previous) => {
-      if (previous.includes(deadLetterId)) {
-        return previous.filter((id) => id !== deadLetterId);
-      }
-      return [...previous, deadLetterId];
-    });
-  }
-
-  async function onReplaySelectedDeadLetters() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    if (selectedDeadLetterIds.length === 0) {
-      setError("Select at least one dead-letter job.");
-      return;
-    }
-
-    const key = adminToken.trim();
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const result = await replayDeadLetterJobsBulk(key, selectedDeadLetterIds);
-      setSelectedDeadLetterIds([]);
-      const [health] = await Promise.all([
-        getAdminQueueHealth(key),
-        loadDeadLetterJobsForAdmin(key),
-        loadDeadLetterReplaysForAdmin(key),
-      ]);
-      setQueueHealth(health);
-
-      if (result.failed_ids.length > 0) {
-        setError(`Some replay operations failed: ${result.failed_ids.join(", ")}`);
-      }
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onDropDeadLetter(deadLetterId: string) {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    const key = adminToken.trim();
-    setAdminLoading(true);
-    setError(null);
-    try {
-      await dropDeadLetterJob(key, deadLetterId);
-      const [health] = await Promise.all([
-        getAdminQueueHealth(key),
-        loadDeadLetterJobsForAdmin(key),
-        loadDeadLetterReplaysForAdmin(key),
-      ]);
-      setQueueHealth(health);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onDropSelectedDeadLetters() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    if (selectedDeadLetterIds.length === 0) {
-      setError("Select at least one dead-letter job.");
-      return;
-    }
-
-    const key = adminToken.trim();
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const result = await dropDeadLetterJobsBulk(key, selectedDeadLetterIds);
-      setSelectedDeadLetterIds([]);
-      const [health] = await Promise.all([
-        getAdminQueueHealth(key),
-        loadDeadLetterJobsForAdmin(key),
-        loadDeadLetterReplaysForAdmin(key),
-      ]);
-      setQueueHealth(health);
-
-      if (result.failed_ids.length > 0) {
-        setError(`Some drop operations failed: ${result.failed_ids.join(", ")}`);
-      }
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onLoadDeadLetterSummary() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const summary = await getDeadLetterSummary(adminToken.trim());
-      setDeadLetterSummary(summary);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onPurgeDeadLetters() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    const key = adminToken.trim();
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const result = await purgeDeadLetterJobs(key, {
-        olderThanDays: purgeOlderThanDays,
-        jobType: deadLetterJobTypeFilter.trim() || undefined,
-        userId: deadLetterUserFilter.trim() || undefined,
-        reasonContains: deadLetterReasonFilter.trim() || undefined,
-        limit: purgeLimit,
-        includeReplayAudits: true,
-      });
-
-      const [health, jobs, replayAudits, summary] = await Promise.all([
-        getAdminQueueHealth(key),
-        listDeadLetterJobs(key, {
-          limit: 25,
-          offset: deadLetterOffset,
-          jobType: deadLetterJobTypeFilter.trim(),
-          userId: deadLetterUserFilter.trim(),
-          reason: deadLetterReasonFilter.trim(),
-        }),
-        listDeadLetterReplays(key, {
-          limit: 25,
-          offset: deadLetterReplayOffset,
-          replayStatus: deadLetterReplayStatusFilter.trim(),
-          adminUserId: deadLetterReplayAdminFilter.trim(),
-          jobUserId: deadLetterReplayUserFilter.trim(),
-        }),
-        getDeadLetterSummary(key),
-      ]);
-
-      setQueueHealth(health);
-      setDeadLetterJobs(jobs);
-      setDeadLetterReplays(replayAudits);
-      setDeadLetterSummary(summary);
-      setSelectedDeadLetterIds((previous) =>
-        previous.filter((id) => jobs.some((item) => item.dead_letter_id === id))
+      const triage = evaluateSafetyText(text);
+      const { plan: newPlan, smartGoal: goal } = compilePlan(
+        auth.user.uid, text,
+        availableTimes.split(",").map(s => s.trim()).filter(Boolean)
       );
 
-      if (result.purged_dead_letter_count === 0) {
-        setError("Purge completed with no matching dead-letter jobs.");
-      }
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onLoadDeadLetterReplays() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      await loadDeadLetterReplaysForAdmin(adminToken.trim());
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onLoadNotificationLogs() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      await loadNotificationLogsForAdmin(adminToken.trim());
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onSendTestNotification() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    const key = adminToken.trim();
-    if (!notificationSendUserId.trim()) {
-      setError("Notification user_id is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      await sendTestNotification(key, {
-        userId: notificationSendUserId.trim(),
-        channel: notificationSendChannel.trim(),
-        message: notificationSendMessage,
-      });
-      await loadNotificationLogsForAdmin(key);
-      await onLoadQueueHealth();
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onLoadNotificationAnalytics() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    const key = adminToken.trim();
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const analytics = await getNotificationAnalytics(key, analyticsDays);
-      setNotificationAnalytics(analytics);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onDownloadNotificationAnalyticsCsv() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    const key = adminToken.trim();
-    setAdminLoading(true);
-    setError(null);
-    try {
-      await downloadNotificationAnalyticsCsv(key, analyticsDays);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  function onApplyDeadLetterFilters() {
-    setDeadLetterOffset(0);
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    const key = adminToken.trim();
-    setAdminLoading(true);
-    setError(null);
-    void listDeadLetterJobs(key, {
-      limit: 25,
-      offset: 0,
-      jobType: deadLetterJobTypeFilter.trim(),
-      userId: deadLetterUserFilter.trim(),
-      reason: deadLetterReasonFilter.trim(),
-    })
-      .then((jobs) => {
-        setDeadLetterJobs(jobs);
-        setSelectedDeadLetterIds((previous) =>
-          previous.filter((id) => jobs.some((item) => item.dead_letter_id === id))
+      if (triage.triggered) {
+        setSafetyTriggered(true);
+        setTriageMessage(triage.triageMessage);
+        const flagId = await addSafetyFlag(
+          auth.user.uid, text, triage.triggerType,
+          triage.severityScore, triage.escalationStatus, triage.triageMessage
         );
-      })
-      .catch((caughtError: unknown) => {
-        setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-      })
-      .finally(() => {
-        setAdminLoading(false);
-      });
-  }
-
-  function onApplyDeadLetterReplayFilters() {
-    setDeadLetterReplayOffset(0);
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    const key = adminToken.trim();
-    setAdminLoading(true);
-    setError(null);
-    void listDeadLetterReplays(key, {
-      limit: 25,
-      offset: 0,
-      replayStatus: deadLetterReplayStatusFilter.trim(),
-      adminUserId: deadLetterReplayAdminFilter.trim(),
-      jobUserId: deadLetterReplayUserFilter.trim(),
-    })
-      .then((replayAudits) => {
-        setDeadLetterReplays(replayAudits);
-      })
-      .catch((caughtError: unknown) => {
-        setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-      })
-      .finally(() => {
-        setAdminLoading(false);
-      });
-  }
-
-  function onApplyNotificationFilters() {
-    setNotificationOffset(0);
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    const key = adminToken.trim();
-    setAdminLoading(true);
-    setError(null);
-    void listNotificationLogs(key, {
-      limit: 25,
-      offset: 0,
-      userId: notificationUserFilter.trim(),
-      channel: notificationChannelFilter.trim(),
-      status: notificationStatusFilter.trim(),
-    })
-      .then((notifications) => {
-        setNotificationLogs(notifications);
-      })
-      .catch((caughtError: unknown) => {
-        setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-      })
-      .finally(() => {
-        setAdminLoading(false);
-      });
-  }
-
-  async function onDeadLetterPageChange(nextOffset: number) {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    const safeOffset = Math.max(0, nextOffset);
-    const key = adminToken.trim();
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const jobs = await listDeadLetterJobs(key, {
-        limit: 25,
-        offset: safeOffset,
-        jobType: deadLetterJobTypeFilter.trim(),
-        userId: deadLetterUserFilter.trim(),
-        reason: deadLetterReasonFilter.trim(),
-      });
-      setDeadLetterOffset(safeOffset);
-      setDeadLetterJobs(jobs);
-      setSelectedDeadLetterIds((previous) => previous.filter((id) => jobs.some((item) => item.dead_letter_id === id)));
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onDeadLetterReplayPageChange(nextOffset: number) {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    const safeOffset = Math.max(0, nextOffset);
-    const key = adminToken.trim();
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const replayAudits = await listDeadLetterReplays(key, {
-        limit: 25,
-        offset: safeOffset,
-        replayStatus: deadLetterReplayStatusFilter.trim(),
-        adminUserId: deadLetterReplayAdminFilter.trim(),
-        jobUserId: deadLetterReplayUserFilter.trim(),
-      });
-      setDeadLetterReplayOffset(safeOffset);
-      setDeadLetterReplays(replayAudits);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onNotificationPageChange(nextOffset: number) {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    const safeOffset = Math.max(0, nextOffset);
-    const key = adminToken.trim();
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const notifications = await listNotificationLogs(key, {
-        limit: 25,
-        offset: safeOffset,
-        userId: notificationUserFilter.trim(),
-        channel: notificationChannelFilter.trim(),
-        status: notificationStatusFilter.trim(),
-      });
-      setNotificationOffset(safeOffset);
-      setNotificationLogs(notifications);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onDownloadDeadLetterReplaysCsv() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      await downloadDeadLetterReplaysCsv(adminToken.trim(), 100);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onTriggerSchedulerTick() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    const key = adminToken.trim();
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const result = await triggerSchedulerTick(key);
-      setSchedulerTick(result);
-
-      const [events, health] = await Promise.all([
-        listWorkerEvents(key, 25),
-        getAdminQueueHealth(key),
-      ]);
-      setWorkerEvents(events);
-      setQueueHealth(health);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onLoadActionAnalytics() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const result = await getActionAnalytics(adminToken.trim(), analyticsDays, 20);
-      setAnalyticsResult(result);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onLoadUserAnalytics() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const result = await getUserAnalytics(adminToken.trim(), analyticsDays, 20);
-      setUserAnalyticsResult(result);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onDownloadActionAnalyticsCsv() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      await downloadActionAnalyticsCsv(adminToken.trim(), analyticsDays, 20);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onDownloadUserAnalyticsCsv() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      await downloadUserAnalyticsCsv(adminToken.trim(), analyticsDays, 20);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onLoadWorkerMetrics() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const result = await getWorkerMetrics(adminToken.trim(), 24);
-      setWorkerMetrics(result);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onRunRetentionMaintenance() {
-    if (!adminToken.trim()) {
-      setError("Admin token is required.");
-      return;
-    }
-
-    setAdminLoading(true);
-    setError(null);
-    try {
-      const result = await runRetentionMaintenance(adminToken.trim(), {
-        olderThanDays: retentionDays,
-        anonymizeNotifications: true,
-        anonymizeFlags: true,
-        deleteOldBanditLogs,
-      });
-      setRetentionResult(result);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  async function onRequestPasswordReset() {
-    if (!email.trim()) {
-      setError("Email is required for reset.");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await requestPasswordReset(email.trim());
-      if (result.reset_token) {
-        setPasswordResetToken(result.reset_token);
+        if (triage.escalationStatus === "escalated" || triage.escalationStatus === "urgent") {
+          await createSafetyEscalationEvent(auth.user.uid, triage.escalationStatus, triage.triageMessage, flagId);
+        }
+      } else {
+        setSafetyTriggered(false);
+        setTriageMessage(null);
+        await savePlan(auth.user.uid, newPlan);
+        await enqueueTask("schedule_session_nudge", auth.user.uid, {
+          session_id: newPlan.nextSession.sessionId,
+          scheduled_at: newPlan.nextSession.scheduledAt,
+        });
       }
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+
+      setPlan(newPlan);
+      setSmartGoal(goal);
+      setView("complete");
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
   }
 
-  async function onConfirmPasswordReset() {
-    if (!passwordResetToken.trim() || !newPassword.trim()) {
-      setError("Reset token and new password are required.");
-      return;
-    }
+  // ── Session complete handler ──────────────────────
+
+  async function handleComplete(e: React.FormEvent) {
+    e.preventDefault();
+    if (!auth.user || !plan) return;
     setLoading(true);
     setError(null);
+
     try {
-      await confirmPasswordReset(passwordResetToken.trim(), newPassword);
-      setPasswordResetToken("");
-      setNewPassword("");
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+      const sessionId = plan.nextSession.sessionId;
+      await firestoreCompleteSession(sessionId, preMood, postMood, feedback);
+
+      const reward = computeReward(preMood, postMood, false);
+      const bandit = await selectNextRecommendation(auth.user.uid, sessionId, feedback);
+
+      await addBanditLog(
+        auth.user.uid,
+        { pre_mood: preMood, post_mood: postMood, source: "worker_queue" },
+        bandit.actionId, bandit.policyVersion, reward
+      );
+
+      await enqueueTask("session_completed", auth.user.uid, {
+        session_id: sessionId, action_id: bandit.actionId,
+        reward, pre_mood: preMood, post_mood: postMood,
+      });
+
+      setSessionResult({ ...bandit, reward });
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
   }
+
+  // ── Render main app ───────────────────────────────
 
   return (
-    <main className="layout">
-      <section className="card">
-        <h2>Account</h2>
-        {userId ? (
-          <div className="stack">
-            <p>
-              Signed in as <strong>{userId}</strong> ({anonymous ? "anonymous" : "registered"})
-            </p>
-            <button type="button" onClick={() => void onSignOut()} disabled={loading}>
-              Sign out
-            </button>
-          </div>
-        ) : (
-          <div className="stack">
-            <button type="button" onClick={onAnonymousSignIn} disabled={loading}>
-              Continue anonymously
-            </button>
+    <div className="app-shell">
+      <nav className="navbar">
+        <div className="navbar-brand">
+          <div className="logo">🧭</div>
+          Path101
+        </div>
+        <div className="navbar-right">
+          <span className="navbar-user">
+            {auth.user.isAnonymous ? "👤 Anonymous" : auth.user.email ?? auth.user.uid.slice(0, 8)}
+          </span>
+          {auth.isAdmin && <span className="badge badge-purple">Admin</span>}
+          <button className="btn btn-ghost btn-sm" onClick={auth.signOutUser}>Sign out</button>
+        </div>
+      </nav>
 
-            <form onSubmit={onRegister} className="stack">
-              <h3>Register</h3>
-              <label>
-                Email
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                Password
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  required
-                />
-              </label>
-              <button type="submit" disabled={loading}>
-                Register
-              </button>
-            </form>
+      <main className="main-content">
+        {error && <div className="alert alert-error">⚠️ {error}</div>}
 
-            <form onSubmit={onLogin} className="stack">
-              <h3>Login</h3>
-              <label>
-                Email
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                Password
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  required
-                />
-              </label>
-              <button type="submit" disabled={loading}>
-                Login
-              </button>
-            </form>
+        {/* Tabs */}
+        <div className="tabs">
+          <button className={`tab ${view === "intake" ? "active" : ""}`} onClick={() => setView("intake")}>
+            📝 New Plan
+          </button>
+          <button
+            className={`tab ${view === "complete" ? "active" : ""}`}
+            onClick={() => setView("complete")}
+            disabled={!plan}
+          >
+            ✅ Complete Session
+          </button>
+        </div>
 
-            <div className="stack">
-              <h3>Password Reset</h3>
-              <button type="button" onClick={onRequestPasswordReset} disabled={loading}>
-                Request Reset Token
-              </button>
-              <label>
-                Reset token
-                <input
-                  value={passwordResetToken}
-                  onChange={(event) => setPasswordResetToken(event.target.value)}
-                  placeholder="Paste reset token"
-                />
-              </label>
-              <label>
-                New password
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(event) => setNewPassword(event.target.value)}
-                />
-              </label>
-              <button type="button" onClick={onConfirmPasswordReset} disabled={loading}>
-                Confirm Password Reset
-              </button>
+        {/* ── Intake form ──────────────────────────── */}
+        {view === "intake" && (
+          <div className="card">
+            <div className="card-header">
+              <div className="icon purple">📝</div>
+              <div>
+                <div className="card-title">Tell us what&apos;s going on</div>
+                <div className="card-subtitle">We&apos;ll create a personalized micro-session plan for you</div>
+              </div>
             </div>
+
+            <form onSubmit={handleIntake}>
+              <div className="form-group">
+                <label className="form-label">What&apos;s been challenging you lately?</label>
+                <textarea
+                  className="form-input"
+                  placeholder="e.g., I keep delaying my assignments and feel anxious about exams..."
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">When are you free? (comma-separated)</label>
+                <input
+                  className="form-input"
+                  placeholder="7-9pm weekdays, Saturday mornings"
+                  value={availableTimes}
+                  onChange={(e) => setAvailableTimes(e.target.value)}
+                />
+              </div>
+              <button className="btn btn-primary btn-block" type="submit" disabled={loading}>
+                {loading ? <span className="spinner" /> : "🚀"} Generate My Plan
+              </button>
+            </form>
           </div>
         )}
-      </section>
 
-      <section className="card">
-        <h1>Path101 MVP</h1>
-        <p className="subtle">
-          Tell me the single problem you want to change and one measurable goal.
-        </p>
-        <form onSubmit={onSubmitIntake} className="stack">
-          <p>
-            <strong>User:</strong> {userId ?? "Not signed in"}
-          </p>
-          <label>
-            Intake Text
-            <textarea
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              rows={4}
-              placeholder="I keep delaying assignments. Goal: do two focused sessions per day."
-              required
+        {/* ── Plan preview ─────────────────────────── */}
+        {plan && view === "complete" && (
+          <>
+            <PlanPreviewCard
+              plan={plan}
+              smartGoal={smartGoal}
+              safetyTriggered={safetyTriggered}
+              triageMessage={triageMessage}
             />
-          </label>
-          <label>
-            Available Times (comma-separated)
-            <input
-              value={availableTimes}
-              onChange={(event) => setAvailableTimes(event.target.value)}
-            />
-          </label>
-          <button type="submit" disabled={loading}>
-            {loading ? "Working..." : "Generate Plan Preview"}
-          </button>
-        </form>
-      </section>
 
-      {intakeResult && (
-        <section className="card">
-          <h2>Plan Preview</h2>
-          <p>
-            <strong>SMART goal:</strong> {intakeResult.smart_goal}
-          </p>
-          {intakeResult.safety_triggered && (
-            <p className="danger">{intakeResult.triage_message}</p>
-          )}
-          <p>
-            <strong>Modules:</strong> {intakeResult.plan_preview.modules.join(", ")}
-          </p>
-          <p>
-            <strong>Next session:</strong> {intakeResult.plan_preview.next_session.title} (
-            {intakeResult.plan_preview.next_session.duration_mins} min)
-          </p>
-          <ul>
-            {intakeResult.plan_preview.next_session.steps.map((step) => (
-              <li key={step.title}>
-                {step.title} — {step.duration_mins}m
-              </li>
-            ))}
-          </ul>
-
-          <form onSubmit={onCompleteSession} className="stack top-gap">
-            <h3>Complete Session</h3>
-            <label>
-              Pre-mood (1-10)
-              <input
-                type="number"
-                min={1}
-                max={10}
-                value={preMood}
-                onChange={(event) => setPreMood(Number(event.target.value))}
-                required
-              />
-            </label>
-            <label>
-              Post-mood (1-10)
-              <input
-                type="number"
-                min={1}
-                max={10}
-                value={postMood}
-                onChange={(event) => setPostMood(Number(event.target.value))}
-                required
-              />
-            </label>
-            <label>
-              Feedback
-              <textarea
-                value={feedback}
-                onChange={(event) => setFeedback(event.target.value)}
-                rows={3}
-              />
-            </label>
-            <button type="submit" disabled={loading}>
-              {loading ? "Saving..." : "Submit Completion"}
-            </button>
-          </form>
-
-          {sessionResult && (
-            <div className="result top-gap">
-              <h3>Next Recommendation</h3>
-              <p>
-                {sessionResult.next_recommendation.title} ({sessionResult.next_recommendation.duration_mins}
-                m)
-              </p>
-              <p>
-                <strong>Reward:</strong> {sessionResult.reward}
-              </p>
-              <p>
-                <strong>Why:</strong> {sessionResult.rationale}
-              </p>
-            </div>
-          )}
-        </section>
-      )}
-
-      {error && <section className="card danger">{error}</section>}
-
-      <section className="card">
-        <h2>Admin Safety</h2>
-        {!isAdmin && <p className="subtle">Login with an admin allowlisted account to access admin endpoints.</p>}
-        <div className="stack">
-          <label>
-            Admin Token
-            <input
-              type="password"
-              value={adminToken}
-              onChange={(event) => setAdminToken(event.target.value)}
-              placeholder="Enter admin bearer token"
-            />
-          </label>
-
-          <div className="stack">
-            <label>
-              <input
-                type="checkbox"
-                checked={pollMode}
-                onChange={(event) => setPollMode(event.target.checked)}
-              />
-              Live poll mode (12s)
-            </label>
-
-            <button type="button" onClick={onLoadQueueHealth} disabled={adminLoading}>
-              {adminLoading ? "Loading..." : "Check Queue Health"}
-            </button>
-            {queueHealth && (
-              <p>
-                Queue: {queueHealth.connected ? "connected" : "disconnected"} • Pending jobs: {queueHealth.queue_size} • Dead-letter jobs: {queueHealth.dead_letter_size}
-              </p>
-            )}
-          </div>
-
-          <label>
-            Flag Filter
-            <select value={flagFilter} onChange={(event) => setFlagFilter(event.target.value)}>
-              <option value="all">all</option>
-              <option value="pending">pending</option>
-              <option value="resolved">resolved</option>
-              <option value="dismissed">dismissed</option>
-            </select>
-          </label>
-
-          <button type="button" onClick={onLoadFlags} disabled={adminLoading}>
-            {adminLoading ? "Loading..." : "Load Safety Flags"}
-          </button>
-
-          <button type="button" onClick={onLoadFlagAnalytics} disabled={adminLoading}>
-            {adminLoading ? "Loading..." : "Load Safety Analytics"}
-          </button>
-
-          <label>
-            Triage Review Status
-            <select
-              value={triageReviewStatus}
-              onChange={(event) =>
-                setTriageReviewStatus(
-                  event.target.value as "pending" | "in_review" | "resolved" | "dismissed"
-                )
-              }
-            >
-              <option value="pending">pending</option>
-              <option value="in_review">in_review</option>
-              <option value="resolved">resolved</option>
-              <option value="dismissed">dismissed</option>
-            </select>
-          </label>
-
-          <label>
-            Triage Escalation Status
-            <select
-              value={triageEscalationStatus}
-              onChange={(event) =>
-                setTriageEscalationStatus(
-                  event.target.value as "none" | "watch" | "escalated" | "urgent"
-                )
-              }
-            >
-              <option value="none">none</option>
-              <option value="watch">watch</option>
-              <option value="escalated">escalated</option>
-              <option value="urgent">urgent</option>
-            </select>
-          </label>
-
-          <label>
-            Triage Notes
-            <textarea value={triageNotes} onChange={(event) => setTriageNotes(event.target.value)} rows={2} />
-          </label>
-
-          {flags.length === 0 ? (
-            <p className="subtle">No flags for this filter.</p>
-          ) : (
-            <ul>
-              {flags.map((flag) => (
-                <li key={flag.id} className="top-gap">
-                  <strong>#{flag.id}</strong> {flag.trigger_type} • severity: {flag.severity_score} • escalation: {flag.escalation_status} • {flag.review_status} • {flag.user_id}
-                  {flag.triage_notes ? ` • notes: ${flag.triage_notes}` : ""}
-                  {flag.reviewer_user_id ? ` • reviewer: ${flag.reviewer_user_id}` : ""}
-                  <div className="stack top-gap">
-                    <button
-                      type="button"
-                      onClick={() => onResolveFlag(flag.id, "resolved")}
-                      disabled={adminLoading || flag.review_status === "resolved"}
-                    >
-                      Mark Resolved
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onResolveFlag(flag.id, "dismissed")}
-                      disabled={adminLoading || flag.review_status === "dismissed"}
-                    >
-                      Mark Dismissed
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onTriageFlag(flag.id)}
-                      disabled={adminLoading}
-                    >
-                      Apply Triage Update
-                    </button>
+            {/* ── Session complete form ──────────── */}
+            {!sessionResult && (
+              <div className="card">
+                <div className="card-header">
+                  <div className="icon green">✅</div>
+                  <div>
+                    <div className="card-title">Complete This Session</div>
+                    <div className="card-subtitle">Record your mood and get your next recommendation</div>
                   </div>
-                </li>
-              ))}
-            </ul>
-          )}
+                </div>
 
-          {flagAnalytics && (
-            <div className="top-gap">
-              <p>
-                Safety analytics — total: {flagAnalytics.total_flags} • avg severity: {flagAnalytics.avg_severity.toFixed(2)}
-              </p>
-              <p className="subtle">By review status:</p>
-              <ul>
-                {flagAnalytics.by_review_status.map((item) => (
-                  <li key={`status-${item.key}`}>
-                    {item.key}: {item.count}
-                  </li>
-                ))}
-              </ul>
-              <p className="subtle">By escalation status:</p>
-              <ul>
-                {flagAnalytics.by_escalation_status.map((item) => (
-                  <li key={`escalation-${item.key}`}>
-                    {item.key}: {item.count}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+                <form onSubmit={handleComplete}>
+                  <div className="form-group">
+                    <label className="form-label">Pre-Session Mood</label>
+                    <div className="mood-row">
+                      <span>😔</span>
+                      <input
+                        className="mood-slider"
+                        type="range" min={1} max={10} value={preMood}
+                        onChange={(e) => setPreMood(Number(e.target.value))}
+                      />
+                      <span className="mood-value">{preMood}</span>
+                      <span>😊</span>
+                    </div>
+                  </div>
 
-          <button type="button" onClick={onLoadWorkerEvents} disabled={adminLoading}>
-            {adminLoading ? "Loading..." : "Load Worker Activity"}
-          </button>
+                  <div className="form-group">
+                    <label className="form-label">Post-Session Mood</label>
+                    <div className="mood-row">
+                      <span>😔</span>
+                      <input
+                        className="mood-slider"
+                        type="range" min={1} max={10} value={postMood}
+                        onChange={(e) => setPostMood(Number(e.target.value))}
+                      />
+                      <span className="mood-value">{postMood}</span>
+                      <span>😊</span>
+                    </div>
+                  </div>
 
-          <button type="button" onClick={onLoadDeadLetterJobs} disabled={adminLoading}>
-            {adminLoading ? "Loading..." : "Load Dead-Letter Jobs"}
-          </button>
-
-          <label>
-            Dead-letter job_type filter
-            <input
-              value={deadLetterJobTypeFilter}
-              onChange={(event) => setDeadLetterJobTypeFilter(event.target.value)}
-              placeholder="session_completed"
-            />
-          </label>
-
-          <label>
-            Dead-letter user filter
-            <input
-              value={deadLetterUserFilter}
-              onChange={(event) => setDeadLetterUserFilter(event.target.value)}
-              placeholder="user id"
-            />
-          </label>
-
-          <label>
-            Dead-letter reason contains
-            <input
-              value={deadLetterReasonFilter}
-              onChange={(event) => setDeadLetterReasonFilter(event.target.value)}
-              placeholder="max_retries_exceeded"
-            />
-          </label>
-
-          <div className="stack">
-            <button type="button" onClick={onApplyDeadLetterFilters} disabled={adminLoading}>
-              {adminLoading ? "Loading..." : "Apply Dead-Letter Filters"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void onDeadLetterPageChange(deadLetterOffset - 25);
-              }}
-              disabled={adminLoading || deadLetterOffset === 0}
-            >
-              Previous Dead-Letter Page
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void onDeadLetterPageChange(deadLetterOffset + 25);
-              }}
-              disabled={adminLoading || deadLetterJobs.length < 25}
-            >
-              Next Dead-Letter Page
-            </button>
-          </div>
-
-          <p className="subtle">Dead-letter offset: {deadLetterOffset}</p>
-
-          <button type="button" onClick={onLoadDeadLetterReplays} disabled={adminLoading}>
-            {adminLoading ? "Loading..." : "Load Dead-Letter Replay Audits"}
-          </button>
-
-          <button type="button" onClick={onLoadDeadLetterSummary} disabled={adminLoading}>
-            {adminLoading ? "Loading..." : "Load Dead-Letter Summary"}
-          </button>
-
-          <label>
-            Purge older than days
-            <input
-              type="number"
-              min={1}
-              max={3650}
-              value={purgeOlderThanDays}
-              onChange={(event) => setPurgeOlderThanDays(Number(event.target.value || 30))}
-            />
-          </label>
-
-          <label>
-            Purge limit
-            <input
-              type="number"
-              min={1}
-              max={5000}
-              value={purgeLimit}
-              onChange={(event) => setPurgeLimit(Number(event.target.value || 500))}
-            />
-          </label>
-
-          <button type="button" onClick={onPurgeDeadLetters} disabled={adminLoading}>
-            {adminLoading ? "Loading..." : "Purge Dead-Letter Jobs"}
-          </button>
-
-          <label>
-            Replay status filter
-            <input
-              value={deadLetterReplayStatusFilter}
-              onChange={(event) => setDeadLetterReplayStatusFilter(event.target.value)}
-              placeholder="replayed or failed"
-            />
-          </label>
-
-          <label>
-            Replay admin user filter
-            <input
-              value={deadLetterReplayAdminFilter}
-              onChange={(event) => setDeadLetterReplayAdminFilter(event.target.value)}
-              placeholder="admin user id"
-            />
-          </label>
-
-          <label>
-            Replay job user filter
-            <input
-              value={deadLetterReplayUserFilter}
-              onChange={(event) => setDeadLetterReplayUserFilter(event.target.value)}
-              placeholder="job user id"
-            />
-          </label>
-
-          <div className="stack">
-            <button type="button" onClick={onApplyDeadLetterReplayFilters} disabled={adminLoading}>
-              {adminLoading ? "Loading..." : "Apply Replay Audit Filters"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void onDeadLetterReplayPageChange(deadLetterReplayOffset - 25);
-              }}
-              disabled={adminLoading || deadLetterReplayOffset === 0}
-            >
-              Previous Replay Page
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void onDeadLetterReplayPageChange(deadLetterReplayOffset + 25);
-              }}
-              disabled={adminLoading || deadLetterReplays.length < 25}
-            >
-              Next Replay Page
-            </button>
-          </div>
-
-          <p className="subtle">Replay audit offset: {deadLetterReplayOffset}</p>
-
-          <button type="button" onClick={onDownloadDeadLetterReplaysCsv} disabled={adminLoading}>
-            {adminLoading ? "Loading..." : "Download Dead-Letter Replay CSV"}
-          </button>
-
-          <button type="button" onClick={onLoadNotificationLogs} disabled={adminLoading}>
-            {adminLoading ? "Loading..." : "Load Notification Logs"}
-          </button>
-
-          <label>
-            Notification user filter
-            <input
-              value={notificationUserFilter}
-              onChange={(event) => setNotificationUserFilter(event.target.value)}
-              placeholder="user id"
-            />
-          </label>
-
-          <label>
-            Notification channel filter
-            <input
-              value={notificationChannelFilter}
-              onChange={(event) => setNotificationChannelFilter(event.target.value)}
-              placeholder="in_app"
-            />
-          </label>
-
-          <label>
-            Notification status filter
-            <input
-              value={notificationStatusFilter}
-              onChange={(event) => setNotificationStatusFilter(event.target.value)}
-              placeholder="delivered or failed"
-            />
-          </label>
-
-          <div className="stack">
-            <button type="button" onClick={onApplyNotificationFilters} disabled={adminLoading}>
-              {adminLoading ? "Loading..." : "Apply Notification Filters"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void onNotificationPageChange(notificationOffset - 25);
-              }}
-              disabled={adminLoading || notificationOffset === 0}
-            >
-              Previous Notification Page
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void onNotificationPageChange(notificationOffset + 25);
-              }}
-              disabled={adminLoading || notificationLogs.length < 25}
-            >
-              Next Notification Page
-            </button>
-          </div>
-
-          <p className="subtle">Notification offset: {notificationOffset}</p>
-
-          <label>
-            Notification test user_id
-            <input
-              value={notificationSendUserId}
-              onChange={(event) => setNotificationSendUserId(event.target.value)}
-              placeholder="user id"
-            />
-          </label>
-
-          <label>
-            Notification test channel
-            <input
-              value={notificationSendChannel}
-              onChange={(event) => setNotificationSendChannel(event.target.value)}
-              placeholder="in_app"
-            />
-          </label>
-
-          <label>
-            Notification test message
-            <textarea
-              value={notificationSendMessage}
-              onChange={(event) => setNotificationSendMessage(event.target.value)}
-              rows={2}
-            />
-          </label>
-
-          <button type="button" onClick={onSendTestNotification} disabled={adminLoading}>
-            {adminLoading ? "Loading..." : "Send Test Notification"}
-          </button>
-
-          <button type="button" onClick={onTriggerSchedulerTick} disabled={adminLoading}>
-            {adminLoading ? "Loading..." : "Run Scheduler Tick Now"}
-          </button>
-
-          {schedulerTick && (
-            <p>
-              Tick result — scanned: {schedulerTick.scanned_sessions}, locks: {schedulerTick.acquired_locks}, enqueued: {schedulerTick.enqueued_jobs}
-            </p>
-          )}
-
-          {workerEvents.length === 0 ? (
-            <p className="subtle">No worker events loaded.</p>
-          ) : (
-            <ul>
-              {workerEvents.map((event) => (
-                <li key={event.id}>
-                  #{event.id} • {event.source} • {event.action_id} • {event.user_id} • reward: {event.reward}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {deadLetterJobs.length === 0 ? (
-            <p className="subtle">No dead-letter jobs loaded.</p>
-          ) : (
-            <ul>
-              {deadLetterJobs.map((job) => (
-                <li key={job.dead_letter_id} className="top-gap">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={selectedDeadLetterIds.includes(job.dead_letter_id)}
-                      onChange={() => onToggleDeadLetterSelection(job.dead_letter_id)}
+                  <div className="form-group">
+                    <label className="form-label">How did it go?</label>
+                    <textarea
+                      className="form-input"
+                      placeholder="Share your experience..."
+                      value={feedback}
+                      onChange={(e) => setFeedback(e.target.value)}
                     />
-                    Select
-                  </label>{" "}
-                  {job.dead_letter_id} • {job.job_type} • {job.user_id} • attempt: {job.attempt}
-                  {job.dead_letter_reason ? ` • reason: ${job.dead_letter_reason}` : ""}
-                  <div className="stack top-gap">
-                    <button
-                      type="button"
-                      onClick={() => onReplayDeadLetter(job.dead_letter_id)}
-                      disabled={adminLoading}
-                    >
-                      Replay Dead-Letter Job
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDropDeadLetter(job.dead_letter_id)}
-                      disabled={adminLoading}
-                    >
-                      Drop Dead-Letter Job
-                    </button>
                   </div>
-                </li>
-              ))}
-            </ul>
-          )}
 
-          <p className="subtle">Selected dead-letter jobs: {selectedDeadLetterIds.length}</p>
-          <button type="button" onClick={onReplaySelectedDeadLetters} disabled={adminLoading || selectedDeadLetterIds.length === 0}>
-            {adminLoading ? "Loading..." : "Replay Selected Dead-Letter Jobs"}
-          </button>
-          <button type="button" onClick={onDropSelectedDeadLetters} disabled={adminLoading || selectedDeadLetterIds.length === 0}>
-            {adminLoading ? "Loading..." : "Drop Selected Dead-Letter Jobs"}
-          </button>
+                  <button className="btn btn-primary btn-block" type="submit" disabled={loading}>
+                    {loading ? <span className="spinner" /> : "🏆"} Complete & Get Reward
+                  </button>
+                </form>
+              </div>
+            )}
 
-          {deadLetterReplays.length === 0 ? (
-            <p className="subtle">No dead-letter replay audits loaded.</p>
-          ) : (
-            <ul>
-              {deadLetterReplays.map((audit) => (
-                <li key={audit.id}>
-                  #{audit.id} • {audit.replay_status} • {audit.dead_letter_id} • {audit.job_type} •
-                  job user: {audit.job_user_id} • admin: {audit.admin_user_id}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {notificationLogs.length === 0 ? (
-            <p className="subtle">No notification logs loaded.</p>
-          ) : (
-            <ul>
-              {notificationLogs.map((item) => (
-                <li key={item.id}>
-                  #{item.id} • {item.status} • {item.channel} • {item.user_id} • {item.source}
-                  {item.error_detail ? ` • error: ${item.error_detail}` : ""}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {deadLetterSummary && (
-            <div className="top-gap">
-              <p>Dead-letter summary total: {deadLetterSummary.total}</p>
-              <p className="subtle">By job type:</p>
-              <ul>
-                {deadLetterSummary.by_job_type.map((item) => (
-                  <li key={`jobtype-${item.key}`}>
-                    {item.key}: {item.count}
-                  </li>
-                ))}
-              </ul>
-              <p className="subtle">By reason:</p>
-              <ul>
-                {deadLetterSummary.by_reason.map((item) => (
-                  <li key={`reason-${item.key}`}>
-                    {item.key}: {item.count}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div className="stack top-gap">
-            <label>
-              Analytics window (days)
-              <input
-                type="number"
-                min={1}
-                max={365}
-                value={analyticsDays}
-                onChange={(event) => setAnalyticsDays(Number(event.target.value || 30))}
-              />
-            </label>
-            <button type="button" onClick={onLoadActionAnalytics} disabled={adminLoading}>
-              {adminLoading ? "Loading..." : "Load Action Analytics"}
-            </button>
-            <button type="button" onClick={onLoadUserAnalytics} disabled={adminLoading}>
-              {adminLoading ? "Loading..." : "Load User Analytics"}
-            </button>
-            <button type="button" onClick={onLoadNotificationAnalytics} disabled={adminLoading}>
-              {adminLoading ? "Loading..." : "Load Notification Analytics"}
-            </button>
-            <button type="button" onClick={onDownloadActionAnalyticsCsv} disabled={adminLoading}>
-              {adminLoading ? "Loading..." : "Download Action CSV"}
-            </button>
-            <button type="button" onClick={onDownloadUserAnalyticsCsv} disabled={adminLoading}>
-              {adminLoading ? "Loading..." : "Download User CSV"}
-            </button>
-            <button type="button" onClick={onDownloadNotificationAnalyticsCsv} disabled={adminLoading}>
-              {adminLoading ? "Loading..." : "Download Notification CSV"}
-            </button>
-            <button type="button" onClick={onLoadWorkerMetrics} disabled={adminLoading}>
-              {adminLoading ? "Loading..." : "Load Worker Metrics"}
-            </button>
-            <label>
-              Retention days
-              <input
-                type="number"
-                min={1}
-                max={3650}
-                value={retentionDays}
-                onChange={(event) => setRetentionDays(Number(event.target.value || 90))}
-              />
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={deleteOldBanditLogs}
-                onChange={(event) => setDeleteOldBanditLogs(event.target.checked)}
-              />
-              Delete old bandit logs
-            </label>
-            <button type="button" onClick={onRunRetentionMaintenance} disabled={adminLoading}>
-              {adminLoading ? "Loading..." : "Run Retention Maintenance"}
-            </button>
-          </div>
-
-          {notificationAnalytics && (
-            <div className="top-gap">
-              <p>
-                Notification analytics: {notificationAnalytics.total_events} event(s) in last {notificationAnalytics.days} day(s), delivery rate {(notificationAnalytics.delivery_rate * 100).toFixed(1)}%
-              </p>
-              <p>
-                Delivered: {notificationAnalytics.delivered} • Failed: {notificationAnalytics.failed}
-              </p>
-              <p className="subtle">By channel:</p>
-              {notificationAnalytics.by_channel.length === 0 ? (
-                <p className="subtle">No channel analytics available.</p>
-              ) : (
-                <ul>
-                  {notificationAnalytics.by_channel.map((item) => (
-                    <li key={`notif-channel-${item.channel}`}>
-                      {item.channel} • total: {item.total} • delivered: {item.delivered} • failed: {item.failed} • rate: {(item.delivery_rate * 100).toFixed(1)}%
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <p className="subtle">By status:</p>
-              {notificationAnalytics.by_status.length === 0 ? (
-                <p className="subtle">No status analytics available.</p>
-              ) : (
-                <ul>
-                  {notificationAnalytics.by_status.map((item) => (
-                    <li key={`notif-status-${item.key}`}>
-                      {item.key}: {item.count}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <p className="subtle">By source:</p>
-              {notificationAnalytics.by_source.length === 0 ? (
-                <p className="subtle">No source analytics available.</p>
-              ) : (
-                <ul>
-                  {notificationAnalytics.by_source.map((item) => (
-                    <li key={`notif-source-${item.key}`}>
-                      {item.key}: {item.count}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <p className="subtle">By day:</p>
-              {notificationAnalytics.by_day.length === 0 ? (
-                <p className="subtle">No day buckets available.</p>
-              ) : (
-                <ul>
-                  {notificationAnalytics.by_day.map((item) => (
-                    <li key={`notif-day-${item.key}`}>
-                      {item.key}: {item.count}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <p className="subtle">Failure reasons:</p>
-              {notificationAnalytics.failure_reasons.length === 0 ? (
-                <p className="subtle">No failure reasons available.</p>
-              ) : (
-                <ul>
-                  {notificationAnalytics.failure_reasons.map((item) => (
-                    <li key={`notif-failure-${item.key}`}>
-                      {item.key}: {item.count}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-
-          {workerMetrics && (
-            <div className="top-gap">
-              <p>
-                Worker metrics (last {workerMetrics.hours}h): {workerMetrics.total_events} events, failures {workerMetrics.total_failures}, rate {(workerMetrics.failure_rate * 100).toFixed(1)}%
-              </p>
-              <p>{workerMetrics.alert_triggered ? "Alert: failure rate threshold exceeded" : "No worker failure alert"}</p>
-              {workerMetrics.by_metric_type.length === 0 ? (
-                <p className="subtle">No worker metric events available.</p>
-              ) : (
-                <ul>
-                  {workerMetrics.by_metric_type.map((item) => (
-                    <li key={`worker-metric-${item.metric_type}`}>
-                      {item.metric_type}: {item.count}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-
-          {retentionResult && (
-            <p>
-              Retention run: notifications anonymized {retentionResult.notifications_anonymized}, flags anonymized {retentionResult.flags_anonymized}, bandit logs deleted {retentionResult.bandit_logs_deleted}
-            </p>
-          )}
-
-          {analyticsResult && (
-            <div className="top-gap">
-              <p>
-                Analytics: {analyticsResult.total_events} events in last {analyticsResult.days} day(s)
-              </p>
-              {analyticsResult.actions.length === 0 ? (
-                <p className="subtle">No action analytics available.</p>
-              ) : (
-                <ul>
-                  {analyticsResult.actions.map((item) => (
-                    <li key={item.action_id}>
-                      {item.action_id} • count: {item.count} • avg reward: {item.avg_reward.toFixed(2)}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-
-          {userAnalyticsResult && (
-            <div className="top-gap">
-              <p>
-                User analytics: {userAnalyticsResult.total_users} user(s) in last {userAnalyticsResult.days} day(s)
-              </p>
-              {userAnalyticsResult.users.length === 0 ? (
-                <p className="subtle">No user analytics available.</p>
-              ) : (
-                <ul>
-                  {userAnalyticsResult.users.map((user) => (
-                    <li key={user.user_id}>
-                      {user.user_id} • completion: {(user.completion_rate * 100).toFixed(1)}% ({user.sessions_completed}/{user.sessions_total}) • avg reward: {user.avg_reward.toFixed(2)} • trend: {user.reward_trend}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="card">
-        <h2>Need urgent help?</h2>
-        <p>
-          This app is not a crisis response tool. If you may be in immediate danger, contact local
-          emergency services now.
-        </p>
-      </section>
-    </main>
+            {/* ── Reward ───────────────────────────── */}
+            {sessionResult && <RewardCard result={sessionResult} />}
+          </>
+        )}
+      </main>
+    </div>
   );
 }

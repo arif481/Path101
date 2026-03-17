@@ -6,6 +6,7 @@ import {
   loginAnonymously,
   register,
   login,
+  loginWithGoogle,
   logout,
   requestPasswordReset,
   confirmReset,
@@ -21,6 +22,7 @@ export type UseAuthReturn = {
   signInAnonymous: () => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signOutUser: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   confirmPasswordReset: (code: string, newPassword: string) => Promise<void>;
@@ -65,6 +67,11 @@ export function useAuth(): UseAuthReturn {
     await login(email, password);
   }, []);
 
+  const signInWithGoogleFn = useCallback(async () => {
+    setLoading(true);
+    await loginWithGoogle();
+  }, []);
+
   const signOutUser = useCallback(async () => {
     await logout();
     setUser(null);
@@ -89,6 +96,7 @@ export function useAuth(): UseAuthReturn {
     signInAnonymous,
     signUp,
     signIn,
+    signInWithGoogle: signInWithGoogleFn,
     signOutUser,
     resetPassword,
     confirmPasswordReset: confirmPwReset,

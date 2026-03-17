@@ -5,6 +5,8 @@ import {
   signOut,
   sendPasswordResetEmail,
   confirmPasswordReset as firebaseConfirmPasswordReset,
+  GoogleAuthProvider,
+  signInWithPopup,
   type User as FirebaseUser,
 } from "firebase/auth";
 import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
@@ -71,6 +73,14 @@ export async function register(email: string, password: string): Promise<Firebas
 
 export async function login(email: string, password: string): Promise<FirebaseUser> {
   const credential = await signInWithEmailAndPassword(auth, email, password);
+  return credential.user;
+}
+
+const googleProvider = new GoogleAuthProvider();
+
+export async function loginWithGoogle(): Promise<FirebaseUser> {
+  const credential = await signInWithPopup(auth, googleProvider);
+  await ensureUserDocs(credential.user);
   return credential.user;
 }
 
