@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/arif481/Path101/actions/workflows/ci.yml/badge.svg)](https://github.com/arif481/Path101/actions/workflows/ci.yml)
 [![Firebase](https://img.shields.io/badge/Powered%20by-Firebase-FFCA28?logo=firebase)](https://firebase.google.com)
-[![Gemini](https://img.shields.io/badge/Gemini%202.0-Flash-4285F4?logo=google)](https://aistudio.google.com)
+[![Gemini](https://img.shields.io/badge/Gemini%202.5-Flash-4285F4?logo=google)](https://aistudio.google.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?logo=typescript)](https://www.typescriptlang.org)
 
