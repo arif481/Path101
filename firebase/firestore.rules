@@ -13,17 +13,22 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.admin == true;
     }
 
-    // ── User data ───────────────────────────────────────────
+    // ── User profile (owner read/write, admin full) ─────────
     match /users/{userId} {
       allow read, write: if isOwner(userId) || isAdmin();
     }
 
+    // ── Auth profile (created on first sign-in, admin manages)
     match /authProfiles/{uid} {
-      allow read:  if isOwner(uid) || isAdmin();
-      allow write: if isAdmin();
+      // User can create their own profile on first sign-in
+      // User can read their own profile
+      // Only admin can update (e.g. role, permissions, isAdmin)
+      allow create: if isOwner(uid);
+      allow read:   if isOwner(uid) || isAdmin();
+      allow update, delete: if isAdmin();
     }
 
-    // ── Plans & Sessions (user-owned) ───────────────────────
+    // ── Plans (user-owned) ──────────────────────────────────
     match /plans/{planId} {
       allow create: if isSignedIn();
       allow read:   if isSignedIn()
@@ -33,6 +38,7 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ── Sessions (user-owned) ───────────────────────────────
     match /sessions/{sessionId} {
       allow create: if isSignedIn();
       allow read:   if isSignedIn()
@@ -42,32 +48,34 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ── Bandit logs (user creates, admin reads) ─────────────
+    // ── Bandit logs (user creates + reads own, admin reads all)
     match /banditLogs/{logId} {
       allow create: if isSignedIn();
       allow read:   if isAdmin()
                     || (isSignedIn() && resource.data.userId == request.auth.uid);
     }
 
-    // ── Safety (user creates, admin manages) ────────────────
+    // ── Safety flags (user creates, admin manages) ──────────
     match /safetyFlags/{flagId} {
       allow create: if isSignedIn();
       allow read, update: if isAdmin();
     }
 
+    // ── Safety escalation events (user creates, admin reads) ─
     match /safetyEscalationEvents/{eventId} {
       allow create: if isSignedIn();
       allow read:   if isAdmin();
     }
 
-    // ── Notifications (in-app) ──────────────────────────────
+    // ── Notifications (user reads own, admin reads all) ─────
     match /notificationLogs/{logId} {
       allow create: if isSignedIn();
-      allow read, update: if isAdmin()
-                          || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow read:   if isAdmin()
+                    || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow update: if isAdmin();
     }
 
-    // ── Dead-letter & replay audits (admin only) ────────────
+    // ── Dead-letter queue (admin only) ──────────────────────
     match /deadLetterJobs/{jobId} {
       allow read, write: if isAdmin();
     }
@@ -76,16 +84,28 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
-    // ── Worker metrics (admin only read, system create) ─────
+    // ── Worker metrics (system creates, admin reads) ────────
     match /workerMetrics/{metricId} {
       allow create: if isSignedIn();
       allow read:   if isAdmin();
     }
 
-    // ── Task queue (system create, admin manage) ────────────
+    // ── Task queue (user enqueues, admin manages) ───────────
     match /taskQueue/{taskId} {
       allow create: if isSignedIn();
-      allow read, write: if isAdmin();
+      allow read, update, delete: if isAdmin();
+    }
+
+    // ── Scheduler locks (system creates, no user access) ────
+    // Used by GitHub Actions scheduler for distributed dedup
+    match /schedulerLocks/{lockId} {
+      // Only admin SDK (server) can write; no client access
+      allow read, write: if false;
+    }
+
+    // ── Deny all other collections by default ───────────────
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
