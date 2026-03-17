@@ -1,19 +1,28 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAuth } from "./firebase/useAuth";
-import { compilePlan, computeReward, type PlanPreview } from "./firebase/services/intakeService";
-import { evaluateSafetyText } from "./firebase/services/safetyService";
-import { selectNextRecommendation, type BanditResult } from "./firebase/services/banditService";
+import {
+  analyzeUserInput,
+  generatePlan,
+  generateReflection,
+  generateProgressInsight,
+  generateStepGuidance,
+  chat as aiChat,
+  type AIAnalysis,
+  type AIPlan,
+  type AISession,
+  type AIReflection,
+  type AIProgressInsight,
+} from "./firebase/services/aiService";
 import {
   savePlan,
+  getLatestPlan,
+  completeSession as firestoreCompleteSession,
   addSafetyFlag,
   createSafetyEscalationEvent,
-  completeSession as firestoreCompleteSession,
-  addBanditLog,
   enqueueTask,
 } from "./firebase/services/firestoreOps";
 
-/* ── Google logo SVG ───────────────────────────────── */
-
+/* ── Google logo ───────────────────────────────────── */
 function GoogleLogo() {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18">
@@ -25,482 +34,467 @@ function GoogleLogo() {
   );
 }
 
-/* ── Auth screen ───────────────────────────────────── */
+/* ── Typing indicator ──────────────────────────────── */
+function TypingDots() {
+  return (
+    <div className="typing-dots">
+      <span /><span /><span />
+    </div>
+  );
+}
 
-function AuthScreen({
-  onAnonymous,
-  onGoogle,
-  onEmailAuth,
-  loading,
-  error,
-}: {
-  onAnonymous: () => void;
-  onGoogle: () => void;
-  onEmailAuth: (email: string, password: string, isRegister: boolean) => void;
-  loading: boolean;
-  error: string | null;
+/* ── Step type icon ────────────────────────────────── */
+function stepIcon(type: string) {
+  const map: Record<string, string> = {
+    exercise: "🏃", reflection: "🪞", action: "⚡", breathing: "🌬️",
+    journaling: "📝", learning: "📚",
+  };
+  return map[type] ?? "✨";
+}
+
+/* ── Auth Screen ───────────────────────────────────── */
+function AuthScreen({ onAnonymous, onGoogle, onEmailAuth, loading, error }: {
+  onAnonymous: () => void; onGoogle: () => void;
+  onEmailAuth: (e: string, p: string, r: boolean) => void;
+  loading: boolean; error: string | null;
 }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [isRegister, setIsRegister] = useState(false);
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    onEmailAuth(email, password, isRegister);
-  }
-
+  const [email, setEmail] = useState(""); const [pw, setPw] = useState("");
+  const [isReg, setIsReg] = useState(false);
   return (
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-brand">
-          <div className="logo">🧭</div>
-          <h1>Path101</h1>
-          <p>Your personal behavior-change companion</p>
+          <div className="logo">🧭</div><h1>Path101</h1>
+          <p>AI-powered personal growth companion</p>
         </div>
-
         {error && <div className="alert alert-error">⚠️ {error}</div>}
-
         <button className="btn btn-google btn-block" onClick={onGoogle} disabled={loading}>
-          <GoogleLogo />
-          Continue with Google
+          <GoogleLogo /> Continue with Google
         </button>
-
         <div className="auth-divider">or</div>
-
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label className="form-label">Email</label>
-            <input
-              className="form-input"
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Password</label>
-            <input
-              className="form-input"
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-            />
-          </div>
+        <form onSubmit={e => { e.preventDefault(); onEmailAuth(email, pw, isReg); }}>
+          <div className="form-group"><label className="form-label">Email</label>
+            <input className="form-input" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required /></div>
+          <div className="form-group"><label className="form-label">Password</label>
+            <input className="form-input" type="password" placeholder="••••••••" value={pw} onChange={e => setPw(e.target.value)} required minLength={6} /></div>
           <button className="btn btn-primary btn-block" type="submit" disabled={loading}>
-            {loading && <span className="spinner" />}
-            {isRegister ? "Create Account" : "Sign In"}
+            {loading && <span className="spinner" />} {isReg ? "Create Account" : "Sign In"}
           </button>
         </form>
-
         <div className="auth-footer">
-          {isRegister ? (
-            <p>Already have an account?{" "}<a onClick={() => setIsRegister(false)}>Sign in</a></p>
-          ) : (
-            <p>Don&apos;t have an account?{" "}<a onClick={() => setIsRegister(true)}>Create one</a></p>
-          )}
+          {isReg ? <p>Already have an account? <a onClick={() => setIsReg(false)}>Sign in</a></p>
+                 : <p>Don&apos;t have an account? <a onClick={() => setIsReg(true)}>Create one</a></p>}
         </div>
-
         <div className="auth-divider">or</div>
-
-        <button className="btn btn-secondary btn-block btn-sm" onClick={onAnonymous} disabled={loading}>
-          👤 Continue anonymously
-        </button>
+        <button className="btn btn-secondary btn-block btn-sm" onClick={onAnonymous} disabled={loading}>👤 Continue anonymously</button>
       </div>
     </div>
   );
 }
 
-/* ── Plan Preview card ─────────────────────────────── */
-
-function PlanPreviewCard({ plan, smartGoal, safetyTriggered, triageMessage }: {
-  plan: PlanPreview;
-  smartGoal: string;
-  safetyTriggered: boolean;
-  triageMessage: string | null;
-}) {
-  const session = plan.nextSession;
-
+/* ── Chat message bubble ─────────────────────────── */
+function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
   return (
-    <div className="card">
-      <div className="card-header">
-        <div className="icon purple">📋</div>
-        <div>
-          <div className="card-title">Your Plan</div>
-          <div className="card-subtitle">Week {plan.currentWeek} of {plan.durationWeeks}</div>
-        </div>
-      </div>
-
-      {safetyTriggered && triageMessage && (
-        <div className="safety-banner">
-          <p>🛡️ {triageMessage}</p>
-        </div>
-      )}
-
-      <div className="smart-goal">💡 {smartGoal}</div>
-
-      <div className="pill-row">
-        {plan.modules.map((mod) => (
-          <span key={mod} className="pill">{mod.replace(/_/g, " ")}</span>
-        ))}
-      </div>
-
-      <div className="plan-grid">
-        <div className="plan-stat">
-          <div className="label">Next Session</div>
-          <div className="value">{session.title}</div>
-        </div>
-        <div className="plan-stat">
-          <div className="label">Duration</div>
-          <div className="value">{session.durationMins} min</div>
-        </div>
-        <div className="plan-stat">
-          <div className="label">Difficulty</div>
-          <div className="value">
-            <span className={`badge badge-${session.difficulty === "low" ? "green" : session.difficulty === "medium" ? "yellow" : "red"}`}>
-              {session.difficulty}
-            </span>
-          </div>
-        </div>
-        <div className="plan-stat">
-          <div className="label">Metrics</div>
-          <div className="value" style={{ fontSize: 13 }}>
-            {session.expectedMetrics.join(", ")}
-          </div>
-        </div>
-      </div>
-
-      <div className="session-steps">
-        {session.steps.map((step, i) => (
-          <div key={i} className="step-item">
-            <div className="step-number">{i + 1}</div>
-            <div className="step-title">{step.title}</div>
-            <div className="step-duration">{step.durationMins}m</div>
-          </div>
-        ))}
-      </div>
+    <div className={`chat-bubble ${role}`}>
+      {role === "ai" && <span className="chat-avatar">🧭</span>}
+      <div className="chat-text">{text}</div>
     </div>
   );
 }
 
-/* ── Session Completion + Reward ───────────────────── */
+/* ═══════════════════════════════════════════════════ */
+/*  MAIN APP                                          */
+/* ═══════════════════════════════════════════════════ */
 
-function RewardCard({ result }: { result: BanditResult & { reward: number } }) {
-  return (
-    <div className="card">
-      <div className="card-header">
-        <div className="icon green">🏆</div>
-        <div>
-          <div className="card-title">Session Complete!</div>
-          <div className="card-subtitle">Here's your reward and next recommendation</div>
-        </div>
-      </div>
-
-      <div className="reward-display">
-        <div>
-          <div className="reward-label">Reward Score</div>
-          <div className="reward-score">{result.reward.toFixed(2)}</div>
-        </div>
-        <div className="reward-rationale">{result.rationale}</div>
-      </div>
-
-      <div style={{ marginTop: 20 }}>
-        <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 8 }}>NEXT RECOMMENDATION</p>
-        <div className="step-item">
-          <div className="step-number">→</div>
-          <div className="step-title">{result.plan.title}</div>
-          <div className="step-duration">{result.plan.durationMins}m</div>
-        </div>
-        <div style={{ marginTop: 8 }}>
-          <span className={`badge badge-${result.plan.difficulty === "low" ? "green" : result.plan.difficulty === "medium" ? "yellow" : "red"}`}>
-            {result.plan.difficulty}
-          </span>
-          <span className="badge badge-purple" style={{ marginLeft: 6 }}>{result.policyVersion}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Main App ──────────────────────────────────────── */
+type View = "home" | "analyzing" | "plan" | "session" | "reflection" | "progress" | "chat";
 
 export function App() {
   const auth = useAuth();
-  const [view, setView] = useState<"intake" | "complete">("intake");
+  const [view, setView] = useState<View>("home");
   const [text, setText] = useState("");
-  const [availableTimes, setAvailableTimes] = useState("7-9pm weekdays");
+  const [times, setTimes] = useState("");
+  const [analysis, setAnalysis] = useState<AIAnalysis | null>(null);
+  const [plan, setPlan] = useState<AIPlan | null>(null);
+  const [activeSession, setActiveSession] = useState<AISession | null>(null);
+  const [activeStepIdx, setActiveStepIdx] = useState(0);
+  const [stepGuidance, setStepGuidance] = useState<string | null>(null);
   const [preMood, setPreMood] = useState(5);
   const [postMood, setPostMood] = useState(6);
   const [feedback, setFeedback] = useState("");
-  const [plan, setPlan] = useState<PlanPreview | null>(null);
-  const [smartGoal, setSmartGoal] = useState("");
-  const [safetyTriggered, setSafetyTriggered] = useState(false);
-  const [triageMessage, setTriageMessage] = useState<string | null>(null);
-  const [sessionResult, setSessionResult] = useState<(BanditResult & { reward: number }) | null>(null);
+  const [reflection, setReflection] = useState<AIReflection | null>(null);
+  const [progressInsight, setProgressInsight] = useState<AIProgressInsight | null>(null);
+  const [completedSessions, setCompletedSessions] = useState<Array<{
+    title: string; preMood: number; postMood: number; feedback: string; completedAt: string;
+  }>>([]);
+
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "ai"; text: string }>>([]);
+  const [chatInput, setChatInput] = useState("");
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Auth handlers ─────────────────────────────────
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
-  async function handleAnonymous() {
-    setError(null);
-    try { await auth.signInAnonymous(); } catch (e) { setError((e as Error).message); }
+  // ── Auth ─────────────────────────────────────────
+  async function handleAnonymous() { setError(null); try { await auth.signInAnonymous(); } catch (e) { setError((e as Error).message); } }
+  async function handleGoogle() { setError(null); try { await auth.signInWithGoogle(); } catch (e) { setError((e as Error).message); } }
+  async function handleEmailAuth(email: string, pw: string, isReg: boolean) {
+    setError(null); try { isReg ? await auth.signUp(email, pw) : await auth.signIn(email, pw); } catch (e) { setError((e as Error).message); }
   }
 
-  async function handleGoogle() {
-    setError(null);
-    try { await auth.signInWithGoogle(); } catch (e) { setError((e as Error).message); }
-  }
+  if (!auth.user) return <AuthScreen onAnonymous={handleAnonymous} onGoogle={handleGoogle} onEmailAuth={handleEmailAuth} loading={auth.loading} error={error} />;
 
-  async function handleEmailAuth(email: string, password: string, isRegister: boolean) {
-    setError(null);
+  // ── AI Intake ────────────────────────────────────
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault(); if (!auth.user || !text.trim()) return;
+    setLoading(true); setError(null); setView("analyzing");
     try {
-      if (isRegister) { await auth.signUp(email, password); }
-      else { await auth.signIn(email, password); }
-    } catch (e) { setError((e as Error).message); }
-  }
+      const pastCtx = completedSessions.length > 0
+        ? completedSessions.map(s => `${s.title}: mood ${s.preMood}→${s.postMood}`).join("; ")
+        : undefined;
+      const result = await analyzeUserInput(text, pastCtx);
+      setAnalysis(result);
 
-  // ── Show auth screen if not logged in ─────────────
-
-  if (!auth.user) {
-    return (
-      <AuthScreen
-        onAnonymous={handleAnonymous}
-        onGoogle={handleGoogle}
-        onEmailAuth={handleEmailAuth}
-        loading={auth.loading}
-        error={error}
-      />
-    );
-  }
-
-  // ── Intake handler ────────────────────────────────
-
-  async function handleIntake(e: React.FormEvent) {
-    e.preventDefault();
-    if (!auth.user) return;
-    setLoading(true);
-    setError(null);
-    setSessionResult(null);
-
-    try {
-      const triage = evaluateSafetyText(text);
-      const { plan: newPlan, smartGoal: goal } = compilePlan(
-        auth.user.uid, text,
-        availableTimes.split(",").map(s => s.trim()).filter(Boolean)
-      );
-
-      if (triage.triggered) {
-        setSafetyTriggered(true);
-        setTriageMessage(triage.triageMessage);
-        const flagId = await addSafetyFlag(
-          auth.user.uid, text, triage.triggerType,
-          triage.severityScore, triage.escalationStatus, triage.triageMessage
-        );
-        if (triage.escalationStatus === "escalated" || triage.escalationStatus === "urgent") {
-          await createSafetyEscalationEvent(auth.user.uid, triage.escalationStatus, triage.triageMessage, flagId);
-        }
-      } else {
-        setSafetyTriggered(false);
-        setTriageMessage(null);
-        await savePlan(auth.user.uid, newPlan);
-        await enqueueTask("schedule_session_nudge", auth.user.uid, {
-          session_id: newPlan.nextSession.sessionId,
-          scheduled_at: newPlan.nextSession.scheduledAt,
-        });
+      if (result.severity === "crisis") {
+        await addSafetyFlag(auth.user.uid, text, "ai_detected", 10, "urgent", result.safetyAlert ?? "Crisis detected");
+        await createSafetyEscalationEvent(auth.user.uid, "urgent", result.safetyAlert ?? "AI crisis detection", "");
       }
 
-      setPlan(newPlan);
-      setSmartGoal(goal);
-      setView("complete");
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
+      const planResult = await generatePlan(result, times ? times.split(",").map(s => s.trim()) : ["flexible"]);
+      setPlan(planResult);
+      setView("plan");
+    } catch (e) { setError((e as Error).message); setView("home"); } finally { setLoading(false); }
   }
 
-  // ── Session complete handler ──────────────────────
-
-  async function handleComplete(e: React.FormEvent) {
-    e.preventDefault();
-    if (!auth.user || !plan) return;
+  // ── Start session ────────────────────────────────
+  async function startSession(session: AISession) {
+    setActiveSession(session); setActiveStepIdx(0); setStepGuidance(null);
+    setPreMood(5); setPostMood(6); setFeedback(""); setView("session");
     setLoading(true);
-    setError(null);
-
     try {
-      const sessionId = plan.nextSession.sessionId;
-      await firestoreCompleteSession(sessionId, preMood, postMood, feedback);
-
-      const reward = computeReward(preMood, postMood, false);
-      const bandit = await selectNextRecommendation(auth.user.uid, sessionId, feedback);
-
-      await addBanditLog(
-        auth.user.uid,
-        { pre_mood: preMood, post_mood: postMood, source: "worker_queue" },
-        bandit.actionId, bandit.policyVersion, reward
-      );
-
-      await enqueueTask("session_completed", auth.user.uid, {
-        session_id: sessionId, action_id: bandit.actionId,
-        reward, pre_mood: preMood, post_mood: postMood,
-      });
-
-      setSessionResult({ ...bandit, reward });
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
+      const guidance = await generateStepGuidance(session.steps[0], session.description, 5);
+      setStepGuidance(guidance);
+    } catch { setStepGuidance(null); } finally { setLoading(false); }
   }
 
-  // ── Render main app ───────────────────────────────
+  // ── Navigate steps ───────────────────────────────
+  async function goToStep(idx: number) {
+    if (!activeSession) return;
+    setActiveStepIdx(idx); setStepGuidance(null); setLoading(true);
+    try {
+      const guidance = await generateStepGuidance(activeSession.steps[idx], activeSession.description, preMood);
+      setStepGuidance(guidance);
+    } catch { setStepGuidance(null); } finally { setLoading(false); }
+  }
 
+  // ── Complete session ─────────────────────────────
+  async function handleComplete() {
+    if (!activeSession || !auth.user) return;
+    setLoading(true); setError(null);
+    try {
+      const ref = await generateReflection(activeSession.title, preMood, postMood, feedback, completedSessions.length);
+      setReflection(ref);
+      setCompletedSessions(prev => [...prev, {
+        title: activeSession.title, preMood, postMood, feedback, completedAt: new Date().toISOString(),
+      }]);
+      await firestoreCompleteSession(activeSession.id, preMood, postMood, feedback);
+      setView("reflection");
+    } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
+  }
+
+  // ── Progress insight ─────────────────────────────
+  async function showProgress() {
+    if (completedSessions.length === 0) { setError("Complete at least one session first."); return; }
+    setLoading(true); setError(null);
+    try {
+      const insight = await generateProgressInsight(completedSessions);
+      setProgressInsight(insight); setView("progress");
+    } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
+  }
+
+  // ── AI Chat ──────────────────────────────────────
+  async function handleChat(e: React.FormEvent) {
+    e.preventDefault(); if (!chatInput.trim()) return;
+    const msg = chatInput.trim(); setChatInput("");
+    setChatMessages(prev => [...prev, { role: "user", text: msg }]);
+    setLoading(true);
+    try {
+      const history = chatMessages.map(m => ({ role: m.role === "ai" ? "assistant" as const : "user" as const, text: m.text }));
+      const reply = await aiChat(msg, history);
+      setChatMessages(prev => [...prev, { role: "ai", text: reply }]);
+    } catch { setChatMessages(prev => [...prev, { role: "ai", text: "I'm having trouble connecting right now. Please try again." }]); }
+    finally { setLoading(false); }
+  }
+
+  // ── Render ───────────────────────────────────────
   return (
     <div className="app-shell">
       <nav className="navbar">
-        <div className="navbar-brand">
-          <div className="logo">🧭</div>
-          Path101
+        <div className="navbar-brand" onClick={() => setView("home")} style={{ cursor: "pointer" }}>
+          <div className="logo">🧭</div> Path101
         </div>
         <div className="navbar-right">
-          <span className="navbar-user">
-            {auth.user.isAnonymous ? "👤 Anonymous" : auth.user.email ?? auth.user.uid.slice(0, 8)}
-          </span>
-          {auth.isAdmin && <span className="badge badge-purple">Admin</span>}
+          <button className="btn btn-ghost btn-sm" onClick={() => setView("home")}>🏠 Home</button>
+          {completedSessions.length > 0 && <button className="btn btn-ghost btn-sm" onClick={showProgress}>📊 Progress</button>}
+          <button className="btn btn-ghost btn-sm" onClick={() => { setChatMessages([]); setView("chat"); }}>💬 Chat</button>
+          <span className="navbar-user">{auth.user.isAnonymous ? "👤" : auth.user.email?.split("@")[0] ?? "User"}</span>
           <button className="btn btn-ghost btn-sm" onClick={auth.signOutUser}>Sign out</button>
         </div>
       </nav>
 
       <main className="main-content">
-        {error && <div className="alert alert-error">⚠️ {error}</div>}
+        {error && <div className="alert alert-error" onClick={() => setError(null)}>⚠️ {error} <span style={{ marginLeft: "auto", cursor: "pointer" }}>✕</span></div>}
 
-        {/* Tabs */}
-        <div className="tabs">
-          <button className={`tab ${view === "intake" ? "active" : ""}`} onClick={() => setView("intake")}>
-            📝 New Plan
-          </button>
-          <button
-            className={`tab ${view === "complete" ? "active" : ""}`}
-            onClick={() => setView("complete")}
-            disabled={!plan}
-          >
-            ✅ Complete Session
-          </button>
-        </div>
-
-        {/* ── Intake form ──────────────────────────── */}
-        {view === "intake" && (
-          <div className="card">
-            <div className="card-header">
-              <div className="icon purple">📝</div>
-              <div>
-                <div className="card-title">Tell us what&apos;s going on</div>
-                <div className="card-subtitle">We&apos;ll create a personalized micro-session plan for you</div>
-              </div>
+        {/* ── HOME ─────────────────────────────── */}
+        {view === "home" && (
+          <>
+            <div className="card hero-card">
+              <h2>What&apos;s on your mind?</h2>
+              <p className="card-subtitle">Tell me anything — I&apos;ll understand your situation and create a plan built just for you.</p>
+              <form onSubmit={handleSubmit} style={{ marginTop: 20 }}>
+                <div className="form-group">
+                  <textarea className="form-input" placeholder="I've been struggling with procrastination... I can't seem to focus on my studies... I feel overwhelmed by deadlines..." value={text} onChange={e => setText(e.target.value)} required style={{ minHeight: 120 }} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">When are you free? (optional)</label>
+                  <input className="form-input" placeholder="e.g., evenings, weekends, mornings before class" value={times} onChange={e => setTimes(e.target.value)} />
+                </div>
+                <button className="btn btn-primary btn-block" type="submit" disabled={loading}>
+                  {loading ? <><span className="spinner" /> Thinking...</> : "✨ Analyze & Create My Plan"}
+                </button>
+              </form>
             </div>
 
-            <form onSubmit={handleIntake}>
-              <div className="form-group">
-                <label className="form-label">What&apos;s been challenging you lately?</label>
-                <textarea
-                  className="form-input"
-                  placeholder="e.g., I keep delaying my assignments and feel anxious about exams..."
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">When are you free? (comma-separated)</label>
-                <input
-                  className="form-input"
-                  placeholder="7-9pm weekdays, Saturday mornings"
-                  value={availableTimes}
-                  onChange={(e) => setAvailableTimes(e.target.value)}
-                />
-              </div>
-              <button className="btn btn-primary btn-block" type="submit" disabled={loading}>
-                {loading ? <span className="spinner" /> : "🚀"} Generate My Plan
-              </button>
-            </form>
-          </div>
-        )}
-
-        {/* ── Plan preview ─────────────────────────── */}
-        {plan && view === "complete" && (
-          <>
-            <PlanPreviewCard
-              plan={plan}
-              smartGoal={smartGoal}
-              safetyTriggered={safetyTriggered}
-              triageMessage={triageMessage}
-            />
-
-            {/* ── Session complete form ──────────── */}
-            {!sessionResult && (
+            {/* Quick actions */}
+            {plan && (
               <div className="card">
-                <div className="card-header">
-                  <div className="icon green">✅</div>
-                  <div>
-                    <div className="card-title">Complete This Session</div>
-                    <div className="card-subtitle">Record your mood and get your next recommendation</div>
-                  </div>
+                <div className="card-header"><div className="icon purple">📋</div>
+                  <div><div className="card-title">Your Active Plan</div><div className="card-subtitle">{plan.title}</div></div>
                 </div>
-
-                <form onSubmit={handleComplete}>
-                  <div className="form-group">
-                    <label className="form-label">Pre-Session Mood</label>
-                    <div className="mood-row">
-                      <span>😔</span>
-                      <input
-                        className="mood-slider"
-                        type="range" min={1} max={10} value={preMood}
-                        onChange={(e) => setPreMood(Number(e.target.value))}
-                      />
-                      <span className="mood-value">{preMood}</span>
-                      <span>😊</span>
+                <p style={{ color: "var(--text-secondary)", fontSize: 14, marginBottom: 16 }}>{plan.approach}</p>
+                <div className="session-steps">
+                  {plan.sessions.map((s, i) => (
+                    <div key={s.id} className="step-item" onClick={() => startSession(s)} style={{ cursor: "pointer" }}>
+                      <div className="step-number">{i + 1}</div>
+                      <div style={{ flex: 1 }}>
+                        <div className="step-title">{s.title}</div>
+                        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{s.description}</div>
+                      </div>
+                      <span className={`badge badge-${s.difficulty === "gentle" ? "green" : s.difficulty === "moderate" ? "yellow" : "red"}`}>{s.difficulty}</span>
+                      <div className="step-duration">{s.durationMins}m</div>
                     </div>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Post-Session Mood</label>
-                    <div className="mood-row">
-                      <span>😔</span>
-                      <input
-                        className="mood-slider"
-                        type="range" min={1} max={10} value={postMood}
-                        onChange={(e) => setPostMood(Number(e.target.value))}
-                      />
-                      <span className="mood-value">{postMood}</span>
-                      <span>😊</span>
-                    </div>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">How did it go?</label>
-                    <textarea
-                      className="form-input"
-                      placeholder="Share your experience..."
-                      value={feedback}
-                      onChange={(e) => setFeedback(e.target.value)}
-                    />
-                  </div>
-
-                  <button className="btn btn-primary btn-block" type="submit" disabled={loading}>
-                    {loading ? <span className="spinner" /> : "🏆"} Complete & Get Reward
-                  </button>
-                </form>
+                  ))}
+                </div>
               </div>
             )}
 
-            {/* ── Reward ───────────────────────────── */}
-            {sessionResult && <RewardCard result={sessionResult} />}
+            {/* Completed sessions summary */}
+            {completedSessions.length > 0 && (
+              <div className="card">
+                <div className="card-header"><div className="icon green">✅</div>
+                  <div><div className="card-title">Completed Sessions</div><div className="card-subtitle">{completedSessions.length} sessions done</div></div>
+                </div>
+                <div className="mood-trend">
+                  {completedSessions.slice(-5).map((s, i) => (
+                    <div key={i} className="mood-trend-item">
+                      <span className="mood-trend-label">{s.title.slice(0, 20)}</span>
+                      <span className="mood-trend-bar">
+                        <span className="mood-bar-pre" style={{ width: `${s.preMood * 10}%` }} />
+                        <span className="mood-bar-post" style={{ width: `${s.postMood * 10}%` }} />
+                      </span>
+                      <span className={`mood-trend-change ${s.postMood >= s.preMood ? "up" : "down"}`}>
+                        {s.postMood >= s.preMood ? "↑" : "↓"}{Math.abs(s.postMood - s.preMood)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <button className="btn btn-secondary btn-block btn-sm" onClick={showProgress} style={{ marginTop: 12 }}>📊 See AI Progress Insight</button>
+              </div>
+            )}
           </>
+        )}
+
+        {/* ── ANALYZING ────────────────────────── */}
+        {view === "analyzing" && (
+          <div className="card" style={{ textAlign: "center", padding: 60 }}>
+            <div className="spinner" style={{ width: 40, height: 40, margin: "0 auto 20px", borderWidth: 3 }} />
+            <h3>Understanding your situation...</h3>
+            <p className="card-subtitle">Analyzing your concerns and crafting a personalized plan</p>
+          </div>
+        )}
+
+        {/* ── PLAN ─────────────────────────────── */}
+        {view === "plan" && plan && (
+          <>
+            {analysis && (
+              <div className="card">
+                <div className="card-header"><div className="icon purple">🧠</div>
+                  <div><div className="card-title">Here&apos;s what I understand</div><div className="card-subtitle">{analysis.emotionalState}</div></div>
+                  <span className={`badge badge-${analysis.severity === "low" ? "green" : analysis.severity === "medium" ? "yellow" : "red"}`}>{analysis.severity}</span>
+                </div>
+                <p style={{ color: "var(--text-secondary)", lineHeight: 1.7 }}>{analysis.summary}</p>
+                {analysis.safetyAlert && <div className="safety-banner"><p>🛡️ {analysis.safetyAlert}</p></div>}
+                <div className="pill-row" style={{ marginTop: 12 }}>{analysis.concerns.map((c, i) => <span key={i} className="pill">{c}</span>)}</div>
+                <div className="smart-goal">💡 {analysis.suggestedApproach}</div>
+              </div>
+            )}
+
+            <div className="card">
+              <div className="card-header"><div className="icon green">📋</div>
+                <div><div className="card-title">{plan.title}</div><div className="card-subtitle">{plan.goal}</div></div>
+              </div>
+              <p style={{ color: "var(--text-secondary)", fontSize: 14, marginBottom: 16 }}>{plan.approach}</p>
+              <div className="plan-grid">
+                <div className="plan-stat"><div className="label">Duration</div><div className="value">{plan.totalWeeks} weeks</div></div>
+                <div className="plan-stat"><div className="label">Frequency</div><div className="value">{plan.sessionsPerWeek}x / week</div></div>
+              </div>
+              <h4 style={{ marginTop: 20, marginBottom: 12, fontSize: 14, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1 }}>Your Sessions</h4>
+              <div className="session-steps">
+                {plan.sessions.map((s, i) => (
+                  <div key={s.id} className="step-item" onClick={() => startSession(s)} style={{ cursor: "pointer" }}>
+                    <div className="step-number">{i + 1}</div>
+                    <div style={{ flex: 1 }}>
+                      <div className="step-title">{s.title}</div>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{s.description}</div>
+                    </div>
+                    <span className={`badge badge-${s.difficulty === "gentle" ? "green" : s.difficulty === "moderate" ? "yellow" : "red"}`}>{s.difficulty}</span>
+                    <div className="step-duration">{s.durationMins}m →</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <button className="btn btn-secondary btn-block" onClick={() => setView("home")}>← Back to Home</button>
+          </>
+        )}
+
+        {/* ── SESSION ──────────────────────────── */}
+        {view === "session" && activeSession && (
+          <div className="card">
+            <div className="card-header"><div className="icon purple">{stepIcon(activeSession.steps[activeStepIdx]?.type ?? "exercise")}</div>
+              <div><div className="card-title">{activeSession.title}</div>
+                <div className="card-subtitle">Step {activeStepIdx + 1} of {activeSession.steps.length}</div></div>
+            </div>
+
+            {/* Step progress */}
+            <div className="step-progress">
+              {activeSession.steps.map((_, i) => (
+                <div key={i} className={`step-dot ${i === activeStepIdx ? "active" : i < activeStepIdx ? "done" : ""}`} onClick={() => goToStep(i)} />
+              ))}
+            </div>
+
+            <div style={{ marginTop: 20 }}>
+              <h3 style={{ marginBottom: 8 }}>{activeSession.steps[activeStepIdx]?.title}</h3>
+              <p style={{ color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 16 }}>
+                {activeSession.steps[activeStepIdx]?.description}
+              </p>
+              {loading && <TypingDots />}
+              {stepGuidance && (
+                <div className="ai-guidance">
+                  <span className="ai-guidance-label">🧭 AI Guidance</span>
+                  <p>{stepGuidance}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="btn-group" style={{ marginTop: 20 }}>
+              {activeStepIdx > 0 && <button className="btn btn-secondary" onClick={() => goToStep(activeStepIdx - 1)}>← Previous</button>}
+              {activeStepIdx < activeSession.steps.length - 1 ? (
+                <button className="btn btn-primary" onClick={() => goToStep(activeStepIdx + 1)} style={{ marginLeft: "auto" }}>Next Step →</button>
+              ) : (
+                <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", gap: 16, flex: 1 }}>
+                  <div className="form-group"><label className="form-label">Pre-Session Mood</label>
+                    <div className="mood-row"><span>😔</span><input className="mood-slider" type="range" min={1} max={10} value={preMood} onChange={e => setPreMood(Number(e.target.value))} /><span className="mood-value">{preMood}</span><span>😊</span></div></div>
+                  <div className="form-group"><label className="form-label">Post-Session Mood</label>
+                    <div className="mood-row"><span>😔</span><input className="mood-slider" type="range" min={1} max={10} value={postMood} onChange={e => setPostMood(Number(e.target.value))} /><span className="mood-value">{postMood}</span><span>😊</span></div></div>
+                  <div className="form-group"><label className="form-label">How did it go?</label>
+                    <textarea className="form-input" placeholder="Share your experience..." value={feedback} onChange={e => setFeedback(e.target.value)} /></div>
+                  <button className="btn btn-primary btn-block" onClick={handleComplete} disabled={loading}>
+                    {loading ? <><span className="spinner" /> Generating reflection...</> : "🏆 Complete & Get Reflection"}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── REFLECTION ───────────────────────── */}
+        {view === "reflection" && reflection && (
+          <div className="card">
+            <div className="card-header"><div className="icon green">🏆</div>
+              <div><div className="card-title">Session Complete!</div><div className="card-subtitle">Here&apos;s your personalized reflection</div></div>
+            </div>
+            <div className="reward-display">
+              <div><div className="reward-label">Mood Change</div>
+                <div className="reward-score">{postMood >= preMood ? "+" : ""}{postMood - preMood}</div></div>
+              <div className="reward-rationale">{reflection.moodInterpretation}</div>
+            </div>
+            <div className="ai-guidance" style={{ marginTop: 16 }}>
+              <span className="ai-guidance-label">💡 Insight</span><p>{reflection.insight}</p>
+            </div>
+            <div className="ai-guidance" style={{ marginTop: 12 }}>
+              <span className="ai-guidance-label">💪 Encouragement</span><p>{reflection.encouragement}</p>
+            </div>
+            <div className="ai-guidance" style={{ marginTop: 12 }}>
+              <span className="ai-guidance-label">➡️ Next Steps</span><p>{reflection.nextSteps}</p>
+            </div>
+            {reflection.journalPrompts.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 8 }}>JOURNAL PROMPTS</p>
+                {reflection.journalPrompts.map((p, i) => (
+                  <div key={i} className="step-item"><div className="step-number">✍️</div><div className="step-title">{p}</div></div>
+                ))}
+              </div>
+            )}
+            <div className="btn-group" style={{ marginTop: 20 }}>
+              <button className="btn btn-primary" onClick={() => setView("home")}>🏠 Home</button>
+              {completedSessions.length >= 2 && <button className="btn btn-secondary" onClick={showProgress}>📊 See Progress</button>}
+            </div>
+          </div>
+        )}
+
+        {/* ── PROGRESS ─────────────────────────── */}
+        {view === "progress" && progressInsight && (
+          <div className="card">
+            <div className="card-header"><div className="icon purple">📊</div>
+              <div><div className="card-title">Your Progress</div><div className="card-subtitle">{completedSessions.length} sessions completed</div></div>
+            </div>
+            <div className="ai-guidance"><span className="ai-guidance-label">📈 Overall</span><p>{progressInsight.overallProgress}</p></div>
+            <div className="ai-guidance" style={{ marginTop: 12 }}><span className="ai-guidance-label">😊 Mood Trend</span><p>{progressInsight.moodTrend}</p></div>
+            <div className="plan-grid" style={{ marginTop: 16 }}>
+              <div className="plan-stat"><div className="label">Strengths</div>
+                {progressInsight.strengths.map((s, i) => <div key={i} style={{ fontSize: 14, marginTop: 4 }}>✅ {s}</div>)}</div>
+              <div className="plan-stat"><div className="label">Focus Areas</div>
+                {progressInsight.areasToFocus.map((a, i) => <div key={i} style={{ fontSize: 14, marginTop: 4 }}>🎯 {a}</div>)}</div>
+            </div>
+            <div className="smart-goal" style={{ marginTop: 16 }}>💡 {progressInsight.recommendation}</div>
+            <button className="btn btn-secondary btn-block" onClick={() => setView("home")} style={{ marginTop: 16 }}>← Back to Home</button>
+          </div>
+        )}
+
+        {/* ── CHAT ─────────────────────────────── */}
+        {view === "chat" && (
+          <div className="card chat-container">
+            <div className="card-header"><div className="icon purple">💬</div>
+              <div><div className="card-title">Talk to Path101</div><div className="card-subtitle">Ask anything — I&apos;m here to help</div></div>
+            </div>
+            <div className="chat-messages">
+              {chatMessages.length === 0 && (
+                <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)" }}>
+                  <p style={{ fontSize: 32, marginBottom: 8 }}>🧭</p>
+                  <p>Hi! I&apos;m Path101. You can ask me anything about managing stress, building better habits, dealing with procrastination, or anything else on your mind.</p>
+                </div>
+              )}
+              {chatMessages.map((m, i) => <ChatBubble key={i} role={m.role === "ai" ? "ai" : "user"} text={m.text} />)}
+              {loading && <div className="chat-bubble ai"><span className="chat-avatar">🧭</span><TypingDots /></div>}
+              <div ref={chatEndRef} />
+            </div>
+            <form onSubmit={handleChat} className="chat-input-row">
+              <input className="form-input" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Type a message..." disabled={loading} />
+              <button className="btn btn-primary" type="submit" disabled={loading || !chatInput.trim()}>Send</button>
+            </form>
+          </div>
         )}
       </main>
     </div>

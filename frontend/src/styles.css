@@ -691,4 +691,249 @@ textarea.form-input {
   .auth-card { padding: 32px 20px; }
   .plan-grid { grid-template-columns: 1fr; }
   .btn-group { flex-direction: column; }
+  .navbar-right { gap: 4px; }
+  .navbar-right .btn { padding: 6px 8px; font-size: 12px; }
 }
+
+/* ── Hero card ──────────────────────────────────────── */
+
+.hero-card {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(168, 85, 247, 0.06));
+  border: 1px solid rgba(99, 102, 241, 0.15);
+}
+
+.hero-card h2 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+/* ── AI guidance box ────────────────────────────────── */
+
+.ai-guidance {
+  padding: 16px 20px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(34, 197, 94, 0.04));
+  border-radius: var(--radius);
+  border: 1px solid rgba(99, 102, 241, 0.12);
+}
+
+.ai-guidance-label {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.ai-guidance p {
+  color: var(--text-secondary);
+  line-height: 1.7;
+  font-size: 14px;
+  margin: 0;
+}
+
+/* ── Step progress dots ─────────────────────────────── */
+
+.step-progress {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+}
+
+.step-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg-input);
+  border: 2px solid var(--border-subtle);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.step-dot.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.5);
+  transform: scale(1.2);
+}
+
+.step-dot.done {
+  background: var(--success);
+  border-color: var(--success);
+}
+
+/* ── Typing dots ────────────────────────────────────── */
+
+.typing-dots {
+  display: flex;
+  gap: 4px;
+  padding: 8px 0;
+}
+
+.typing-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: typingBounce 1.2s ease-in-out infinite;
+}
+
+.typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+
+/* ── Chat interface ─────────────────────────────────── */
+
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 500px;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 0;
+}
+
+.chat-bubble {
+  display: flex;
+  gap: 10px;
+  max-width: 85%;
+  animation: fadeSlideIn 0.3s ease;
+}
+
+.chat-bubble.user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.chat-bubble.ai {
+  align-self: flex-start;
+}
+
+.chat-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent-glow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.chat-text {
+  padding: 12px 16px;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.chat-bubble.user .chat-text {
+  background: var(--accent);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-bubble.ai .chat-text {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-bottom-left-radius: 4px;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.chat-input-row .form-input {
+  flex: 1;
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Mood trend bars ────────────────────────────────── */
+
+.mood-trend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mood-trend-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.mood-trend-label {
+  width: 120px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mood-trend-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-input);
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.mood-bar-pre {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 50%;
+  background: var(--accent);
+  border-radius: 4px 4px 0 0;
+  opacity: 0.5;
+  transition: width 0.5s ease;
+}
+
+.mood-bar-post {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 50%;
+  background: var(--success);
+  border-radius: 0 0 4px 4px;
+  transition: width 0.5s ease;
+}
+
+.mood-trend-change {
+  min-width: 30px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.mood-trend-change.up { color: var(--success); }
+.mood-trend-change.down { color: var(--danger); }
+
