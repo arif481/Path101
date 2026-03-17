@@ -1,9 +1,9 @@
 name: Path101 Scheduler Tick
 
 on:
-  schedule:
-    # Run every 15 minutes
-    - cron: '*/15 * * * *'
+  # Uncomment the schedule once FIREBASE_SERVICE_ACCOUNT secret is set
+  # schedule:
+  #   - cron: '*/15 * * * *'
   workflow_dispatch: {}
 
 jobs:
