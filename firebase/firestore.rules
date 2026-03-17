@@ -1,0 +1,91 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    // ── User data ───────────────────────────────────────────
+    match /users/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+    }
+
+    match /authProfiles/{uid} {
+      allow read:  if isOwner(uid) || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ── Plans & Sessions (user-owned) ───────────────────────
+    match /plans/{planId} {
+      allow create: if isSignedIn();
+      allow read:   if isSignedIn()
+                    && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isSignedIn()
+                    && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /sessions/{sessionId} {
+      allow create: if isSignedIn();
+      allow read:   if isSignedIn()
+                    && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isSignedIn()
+                    && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // ── Bandit logs (user creates, admin reads) ─────────────
+    match /banditLogs/{logId} {
+      allow create: if isSignedIn();
+      allow read:   if isAdmin()
+                    || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // ── Safety (user creates, admin manages) ────────────────
+    match /safetyFlags/{flagId} {
+      allow create: if isSignedIn();
+      allow read, update: if isAdmin();
+    }
+
+    match /safetyEscalationEvents/{eventId} {
+      allow create: if isSignedIn();
+      allow read:   if isAdmin();
+    }
+
+    // ── Notifications (in-app) ──────────────────────────────
+    match /notificationLogs/{logId} {
+      allow create: if isSignedIn();
+      allow read, update: if isAdmin()
+                          || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // ── Dead-letter & replay audits (admin only) ────────────
+    match /deadLetterJobs/{jobId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /deadLetterReplayAudits/{auditId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── Worker metrics (admin only read, system create) ─────
+    match /workerMetrics/{metricId} {
+      allow create: if isSignedIn();
+      allow read:   if isAdmin();
+    }
+
+    // ── Task queue (system create, admin manage) ────────────
+    match /taskQueue/{taskId} {
+      allow create: if isSignedIn();
+      allow read, write: if isAdmin();
+    }
+  }
+}

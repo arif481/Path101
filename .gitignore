@@ -9,6 +9,13 @@ __pycache__/
 node_modules/
 dist/
 
+# Firebase
+firebase/firebase-debug.log
+firebase/.firebase/
+
+# Scripts
+scripts/node_modules/
+
 # OS/editor
 .DS_Store
 .vscode/settings.json

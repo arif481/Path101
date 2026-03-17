@@ -1,228 +1,197 @@
-# Path101 MVP
+<div align="center">
 
-Initial implementation of the behavior-change app foundation:
-- `frontend/`: React + TypeScript app for intake, plan preview, and session completion.
-- `backend/`: FastAPI service with rule-first intake parsing, SMART goal shaping, plan compilation, and safety triage trigger.
+# 🧭 Path101
 
-## Local run
+**Behavior-change micro-intervention platform for students**
 
-### 1) Backend
+An evidence-based system that helps students overcome procrastination, anxiety, and poor study habits through personalized micro-sessions, adaptive recommendations, and real-time safety monitoring.
 
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-alembic upgrade head
-uvicorn app.main:app --reload
+[![CI](https://github.com/arif481/Path101/actions/workflows/ci.yml/badge.svg)](https://github.com/arif481/Path101/actions)
+[![Firebase](https://img.shields.io/badge/Firebase-Spark%20Plan-FFCA28?logo=firebase&logoColor=black)](https://firebase.google.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+
+</div>
+
+---
+
+## ✨ Features
+
+| Feature | Description |
+|---|---|
+| 🎯 **Smart Intake** | NLP keyword classification maps free-text concerns to evidence-based BCT modules |
+| 🧠 **Adaptive Bandit** | Epsilon-greedy multi-armed bandit learns which session type works best per user |
+| 🛡️ **Safety Triage** | Real-time crisis language detection with severity scoring and admin escalation |
+| 📊 **Admin Dashboard** | Full RBAC-protected panel for safety flags, dead-letter queue, analytics, and notifications |
+| ⏰ **Session Nudges** | Automated reminders via GitHub Actions cron with distributed dedup locks |
+| 📱 **Responsive UI** | React + TypeScript SPA with anonymous and email auth |
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│                   Browser (React)                │
+│                                                  │
+│  ┌─────────┐  ┌──────────┐  ┌───────────────┐   │
+│  │Firebase  │  │ Intake   │  │ Bandit Policy │   │
+│  │Auth SDK  │  │ Service  │  │ (ε-greedy)    │   │
+│  └────┬─────┘  └────┬─────┘  └──────┬────────┘   │
+│       │              │               │            │
+│  ┌────▼──────────────▼───────────────▼────────┐   │
+│  │         Firestore SDK (reads/writes)       │   │
+│  └────────────────────┬───────────────────────┘   │
+└───────────────────────┼───────────────────────────┘
+                        │
+              ┌─────────▼─────────┐
+              │  Cloud Firestore  │   ← Spark Plan (free)
+              │  Firebase Auth    │   ← 50K MAU free
+              └───────────────────┘
+                        ▲
+              ┌─────────┴─────────┐
+              │  GitHub Actions   │   ← Scheduler cron
+              │  (scheduler-tick) │     (free)
+              └───────────────────┘
 ```
 
-Optional DB configuration:
+**Zero server cost** — all business logic runs client-side. Firebase Spark plan (no credit card needed).
+
+## 📁 Project Structure
+
+```
+Path101/
+├── frontend/                    # React + TypeScript SPA
+│   └── src/
+│       ├── firebase/
+│       │   ├── config.ts        # Firebase SDK init + emulator support
+│       │   ├── authService.ts   # Auth (anon, email, password reset)
+│       │   ├── useAuth.ts       # React auth hook
+│       │   ├── firebaseApi.ts   # API layer (feature-flag switchable)
+│       │   └── services/
+│       │       ├── intakeService.ts   # Keyword classification + plan gen
+│       │       ├── banditService.ts   # ε-greedy recommendation engine
+│       │       ├── safetyService.ts   # Crisis language detection
+│       │       ├── firestoreOps.ts    # Firestore CRUD for all collections
+│       │       └── adminService.ts    # Admin panel operations
+│       ├── api.ts               # Legacy REST API layer
+│       └── types.ts             # TypeScript interfaces
+├── backend/                     # FastAPI (legacy, still functional)
+│   ├── app/
+│   │   ├── main.py              # FastAPI entry point
+│   │   ├── routers/             # REST endpoints
+│   │   ├── services/            # Business logic (Python)
+│   │   └── models/              # SQLAlchemy ORM models
+│   └── tests/                   # pytest test suite (7 files)
+├── firebase/
+│   ├── firebase.json            # Hosting + Firestore config
+│   ├── firestore.rules          # Security rules (RBAC)
+│   └── firestore.indexes.json   # Composite query indexes
+├── scripts/
+│   └── scheduler-tick.ts        # GitHub Actions nudge scanner
+└── .github/workflows/
+    └── scheduler-tick.yml       # Cron job (every 15 min)
+```
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org) 18+
+- A [Firebase project](https://console.firebase.google.com) (free Spark plan)
+
+### 1. Clone & Install
+
+```bash
+git clone https://github.com/arif481/Path101.git
+cd Path101/frontend
+npm install
+```
+
+### 2. Configure Firebase
 
 ```bash
 cp .env.example .env
-# edit DATABASE_URL if using PostgreSQL
-# set JWT_SECRET and ADMIN_EMAIL_ALLOWLIST
 ```
 
-Create a new migration after model changes:
+Edit `.env` with your Firebase project config:
+
+```env
+VITE_FIREBASE_API_KEY=your-api-key
+VITE_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your-project-id
+VITE_FIREBASE_STORAGE_BUCKET=your-project.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=123456789
+VITE_FIREBASE_APP_ID=1:123456789:web:abc123
+VITE_USE_FIREBASE=true
+```
+
+### 3. Firebase Setup
+
+In the [Firebase Console](https://console.firebase.google.com):
+
+1. **Authentication** → Enable **Email/Password** and **Anonymous** sign-in
+2. **Firestore** → Create database in **production mode**
+
+Deploy security rules and indexes:
 
 ```bash
-alembic revision --autogenerate -m "describe change"
-alembic upgrade head
+npm install -g firebase-tools
+firebase login
+cd firebase && firebase deploy --only firestore
 ```
 
-API docs: http://127.0.0.1:8000/docs
-
-Optional local Redis (for queue/scheduler health and jobs):
-
-```bash
-sudo apt update
-sudo apt install redis-server -y
-sudo systemctl enable --now redis-server
-redis-cli ping
-```
-
-Run worker locally (separate terminal):
-
-```bash
-cd backend
-source .venv/bin/activate
-python -m app.worker
-```
-
-Worker scheduler settings (optional):
-
-- `SCHEDULER_INTERVAL_SECONDS` (default `60`)
-- `NUDGE_LOOKAHEAD_MINUTES` (default `30`)
-- `NUDGE_LOOKBACK_HOURS` (default `24`)
-- `NUDGE_LOCK_TTL_SECONDS` (default `86400`)
-- `BANDIT_EPSILON` (default `0.2`)
-- `BANDIT_MIN_HISTORY` (default `3`)
-- `AUTH_RATE_LIMIT_COUNT` / `AUTH_RATE_LIMIT_WINDOW_SECONDS`
-- `ADMIN_RATE_LIMIT_COUNT` / `ADMIN_RATE_LIMIT_WINDOW_SECONDS`
-- `WORKER_MAX_RETRIES` (default `3`)
-- `NOTIFICATION_CHANNELS` (default `in_app,email`)
-
-The worker scans for incomplete sessions scheduled in the configured window and enqueues `session_nudge` jobs with Redis dedupe locks.
-Failed worker jobs are retried up to `WORKER_MAX_RETRIES` and then moved to a Redis dead-letter queue.
-Session completion recommendations use an epsilon-greedy bandit policy (`recovery_10`, `focus_15`, `deep_20`) with cold-start exploration and feedback guardrails.
-
-### 2) Frontend
+### 4. Run Locally
 
 ```bash
 cd frontend
-npm install
 npm run dev
 ```
 
-Open: http://127.0.0.1:5173
+Open [http://localhost:5173](http://localhost:5173)
 
-## Tests and CI
-
-Backend tests:
+### 5. Deploy
 
 ```bash
-cd backend
-source .venv/bin/activate
-pytest -q
+cd frontend && npm run build
+cd ../firebase && firebase deploy --only hosting
 ```
 
-Frontend checks:
+## 🧪 Testing
 
 ```bash
-cd frontend
-npm run test
-npm run build
+# Frontend
+cd frontend && npm test
+
+# Legacy backend (still works)
+cd backend && python -m pytest tests/ -q
 ```
 
-GitHub Actions runs both backend and frontend checks on push/PR to `main`.
+## 🔒 Security Model
 
-## Implemented endpoints
+| Collection | User Access | Admin Access |
+|---|---|---|
+| `users/{uid}` | Own data only | Full |
+| `plans/{planId}` | Own plans only | Full |
+| `sessions/{sid}` | Own sessions only | Full |
+| `safetyFlags` | Create only | Full CRUD |
+| `deadLetterJobs` | — | Full CRUD |
+| `notificationLogs` | Own notifications | Full |
+| `workerMetrics` | — | Read only |
 
-- `POST /auth/anonymous`
-- `POST /auth/register`
-- `POST /auth/login`
-- `POST /auth/refresh`
-- `POST /auth/logout`
-- `POST /auth/password-reset/request`
-- `POST /auth/password-reset/confirm`
-- `GET /auth/me`
-- `POST /intake`
-- `GET /plan/{user_id}`
-- `POST /session/{session_id}/complete`
-- `GET /admin/flags` (requires admin Bearer token)
-- `POST /admin/flag/{id}/resolve` (requires admin Bearer token)
-- `POST /admin/flag/{id}/triage` (requires admin Bearer token)
-- `GET /admin/safety-escalations` (requires admin Bearer token + permission)
-- `GET /admin/flags/analytics` (requires admin Bearer token)
-- `GET /admin/queue-health` (requires admin Bearer token)
-- `GET /admin/notifications` (requires admin Bearer token)
-- `POST /admin/notifications/test-send` (requires admin Bearer token)
-- `GET /admin/notifications/analytics` and `GET /admin/notifications/analytics.csv` (requires admin Bearer token)
-- `GET /admin/dead-letter-jobs` (requires admin Bearer token)
-- `POST /admin/dead-letter-jobs/{dead_letter_id}/replay` (requires admin Bearer token)
-- `POST /admin/dead-letter-jobs/{dead_letter_id}/drop` (requires admin Bearer token)
-- `POST /admin/dead-letter-jobs/replay-bulk` (requires admin Bearer token)
-- `POST /admin/dead-letter-jobs/drop-bulk` (requires admin Bearer token)
-- `GET /admin/dead-letter-summary` (requires admin Bearer token)
-- `POST /admin/dead-letter-jobs/purge` (requires admin Bearer token)
-- `GET /admin/dead-letter-replays` and `GET /admin/dead-letter-replays.csv` (requires admin Bearer token)
-- `GET /admin/dead-letter-replays/filter` (requires admin Bearer token)
-- `GET /admin/analytics/actions` and `GET /admin/analytics/users` (requires admin Bearer token)
-- `GET /admin/worker-metrics` (requires admin Bearer token + permission)
-- `POST /admin/maintenance/retention` (requires admin Bearer token + permission)
-- `GET /admin/rbac/{user_id}` and `POST /admin/rbac/{user_id}` (requires admin Bearer token + permission)
-- `GET /health`
-
-## Notes
-
-- Current storage is SQLAlchemy-backed (`sqlite` by default, PostgreSQL-ready via `DATABASE_URL`).
-- Crisis-like language triggers triage messaging and safety flag behavior stub.
-- Safety triage now includes severity scoring with escalation statuses (`none`, `watch`, `escalated`, `urgent`) and admin review lifecycle fields.
-- Notification delivery now supports concrete channel handlers (`in_app`, `email` via SMTP, `webhook`) with persisted failures.
-- Notification analytics includes delivery-rate plus channel/source/status/day/failure-reason breakdowns with CSV export.
-- Auth now includes refresh-token rotation, logout revocation, and password-reset token lifecycle.
-- Admin RBAC is scoped by role+permissions and enforced per endpoint.
-- Worker metrics and retention maintenance endpoints support operational alerts and data lifecycle controls.
-
-## Deploy (Render blueprint)
-
-This repo includes `render.yaml` for backend API, backend worker, and static frontend services.
-
-### 1) Push latest code to GitHub
+Admin access is granted via Firebase Auth custom claims:
 
 ```bash
-git push origin main
+firebase auth:set-custom-user-claims <UID> '{"admin": true}'
 ```
 
-### 2) Create services in Render
+## 🔄 Feature Flag
 
-- In Render dashboard choose **New +** → **Blueprint**.
-- Connect your GitHub repo and select branch `main`.
-- Render will detect `render.yaml` and create:
-	- `path101-api` (FastAPI)
-	- `path101-worker` (Redis queue consumer)
-	- `path101-web` (Vite static site)
+The app supports dual-mode operation via environment variable:
 
-### 3) Set environment variables
+| `VITE_USE_FIREBASE` | Behavior |
+|---|---|
+| `true` | All operations use Firebase (Firestore + Auth) |
+| `false` | Falls back to legacy REST API backend |
 
-For `path101-api`:
-- `DATABASE_URL` = your production PostgreSQL URL
-- `APP_ENV` = `production`
-- `AUTO_MIGRATE` = `false` (recommended in production)
-- `JWT_SECRET` = long random string
-- `JWT_EXPIRES_MINUTES` = access token lifetime (default `10080`)
-- `REFRESH_EXPIRES_DAYS` = refresh token lifetime (default `30`)
-- `ADMIN_EMAIL_ALLOWLIST` = comma-separated admin login emails (e.g. `admin@yourdomain.com`)
-- `REDIS_URL` = your Redis instance URL
-- `NOTIFICATION_CHANNELS` = e.g. `in_app,email,webhook`
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL` (required for email channel)
-- `NOTIFICATION_WEBHOOK_URL` (required for webhook channel)
-- `WORKER_ALERT_FAILURE_RATE` = e.g. `0.20`
-- `CORS_ORIGINS` = frontend URL(s), comma-separated (e.g. `https://path101-web.onrender.com`)
-- `TRUSTED_HOSTS` = backend host(s), comma-separated (e.g. `path101-api.onrender.com`)
+## 📄 License
 
-For `path101-web`:
-- `VITE_API_BASE_URL` = deployed backend URL (e.g. `https://path101-api.onrender.com`)
-
-For `path101-worker`:
-- Use the same `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ADMIN_EMAIL_ALLOWLIST`
-- Keep scheduler and retry defaults unless tuning:
-	- `SCHEDULER_INTERVAL_SECONDS=60`
-	- `NUDGE_LOOKAHEAD_MINUTES=30`
-	- `NUDGE_LOOKBACK_HOURS=24`
-	- `NUDGE_LOCK_TTL_SECONDS=86400`
-	- `WORKER_MAX_RETRIES=3`
-
-### 4) Redeploy frontend after setting `VITE_API_BASE_URL`
-
-- In Render `path101-web` service, click **Manual Deploy** → **Deploy latest commit**.
-
-### 5) Post-deploy checks
-
-- Backend health: `GET /health`
-- Frontend loads and can:
-	- continue anonymously
-	- register/login
-	- create intake plan
-
-## Production hardening notes
-
-- The API now validates critical settings at startup when `APP_ENV=production`.
-- Use Alembic migrations (`alembic upgrade head`) for schema changes in all managed environments.
-- `AUTO_MIGRATE` is opt-in and defaults to `false`; leave it disabled in production.
-- CORS and trusted hosts are environment-driven (`CORS_ORIGINS`, `TRUSTED_HOSTS`).
-- Request rate limiting is Redis-backed when `REDIS_URL` is available, with in-memory fallback for local resilience.
-- Worker nudge jobs emit notification delivery logs (`delivered`/`failed`) based on `NOTIFICATION_CHANNELS`.
-
-## Pre-launch smoke test checklist
-
-- `GET /health` returns `{"status":"ok"}`.
-- Register/login works and returns both `access_token` and `refresh_token`.
-- `POST /auth/refresh` rotates refresh token successfully.
-- Intake creates plan preview and session completion works.
-- Admin can load flags/queue/dead-letter/notification analytics.
-- `POST /admin/scheduler/tick` works and worker consumes jobs.
-- Notification analytics CSV downloads successfully.
-- `POST /admin/maintenance/retention` runs successfully with test parameters.
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
