@@ -17,12 +17,14 @@ import type {
   NotificationAnalyticsResponse,
   NotificationSendResponse,
   QueueHealthResponse,
+  RetentionMaintenanceResponse,
   ResolveReviewStatus,
   SchedulerTickResponse,
   SafetyFlagItem,
   SafetyFlagAnalyticsResponse,
   SessionCompleteResponse,
   UserAnalyticsResponse,
+  WorkerMetricsResponse,
   WorkerEventItem,
 } from "./types";
 
@@ -103,6 +105,58 @@ export async function authLogin(email: string, password: string): Promise<AuthTo
   }
 
   return response.json() as Promise<AuthTokenResponse>;
+}
+
+export async function authRefresh(refreshToken: string): Promise<AuthTokenResponse> {
+  const response = await fetch(`${BASE_URL}/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Token refresh failed");
+  }
+
+  return response.json() as Promise<AuthTokenResponse>;
+}
+
+export async function authLogout(refreshToken: string): Promise<void> {
+  const response = await fetch(`${BASE_URL}/auth/logout`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Logout failed");
+  }
+}
+
+export async function requestPasswordReset(email: string): Promise<{ status: string; reset_token: string | null }> {
+  const response = await fetch(`${BASE_URL}/auth/password-reset/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Password reset request failed");
+  }
+
+  return response.json() as Promise<{ status: string; reset_token: string | null }>;
+}
+
+export async function confirmPasswordReset(resetToken: string, newPassword: string): Promise<void> {
+  const response = await fetch(`${BASE_URL}/auth/password-reset/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reset_token: resetToken, new_password: newPassword }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Password reset confirm failed");
+  }
 }
 
 export async function authMe(token: string): Promise<MeResponse> {
@@ -352,6 +406,49 @@ export async function triggerSchedulerTick(adminKey: string): Promise<SchedulerT
   }
 
   return response.json() as Promise<SchedulerTickResponse>;
+}
+
+export async function getWorkerMetrics(adminKey: string, hours = 24): Promise<WorkerMetricsResponse> {
+  const response = await fetch(`${BASE_URL}/admin/worker-metrics?hours=${hours}`, {
+    method: "GET",
+    headers: adminHeaders(adminKey),
+  });
+
+  if (!response.ok) {
+    throw new Error("Worker metrics request failed");
+  }
+
+  return response.json() as Promise<WorkerMetricsResponse>;
+}
+
+export async function runRetentionMaintenance(
+  adminKey: string,
+  payload: {
+    olderThanDays: number;
+    anonymizeNotifications: boolean;
+    anonymizeFlags: boolean;
+    deleteOldBanditLogs: boolean;
+  }
+): Promise<RetentionMaintenanceResponse> {
+  const response = await fetch(`${BASE_URL}/admin/maintenance/retention`, {
+    method: "POST",
+    headers: {
+      ...adminHeaders(adminKey),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      older_than_days: payload.olderThanDays,
+      anonymize_notifications: payload.anonymizeNotifications,
+      anonymize_flags: payload.anonymizeFlags,
+      delete_old_bandit_logs: payload.deleteOldBanditLogs,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Retention maintenance request failed");
+  }
+
+  return response.json() as Promise<RetentionMaintenanceResponse>;
 }
 
 export async function listDeadLetterJobs(

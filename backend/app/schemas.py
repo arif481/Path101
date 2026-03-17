@@ -62,10 +62,13 @@ class SessionCompleteResponse(BaseModel):
 
 class AuthTokenResponse(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
     user_id: str
     anonymous: bool
     is_admin: bool = False
+    role: str = "user"
+    permissions: list[str] = Field(default_factory=list)
 
 
 class AnonymousAuthResponse(AuthTokenResponse):
@@ -86,7 +89,31 @@ class MeResponse(BaseModel):
     user_id: str
     anonymous: bool
     is_admin: bool
+    role: str = "user"
+    permissions: list[str] = Field(default_factory=list)
     created_at: datetime
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=12, max_length=512)
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=255)
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    reset_token: str = Field(..., min_length=12, max_length=512)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
+class PasswordResetRequestResponse(BaseModel):
+    status: str
+    reset_token: str | None = None
+
+
+class AuthLogoutRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=12, max_length=512)
 
 
 class SafetyFlagItem(BaseModel):
@@ -248,6 +275,8 @@ class NotificationAnalyticsResponse(BaseModel):
     by_status: list[NotificationAnalyticsBucket]
     by_source: list[NotificationAnalyticsBucket]
     by_channel: list[NotificationChannelAnalyticsItem]
+    by_day: list[NotificationAnalyticsBucket]
+    failure_reasons: list[NotificationAnalyticsBucket]
 
 
 class WorkerEventItem(BaseModel):
@@ -263,6 +292,55 @@ class SchedulerTickResponse(BaseModel):
     scanned_sessions: int
     acquired_locks: int
     enqueued_jobs: int
+
+
+class WorkerMetricItem(BaseModel):
+    metric_type: str
+    count: int
+
+
+class WorkerMetricsResponse(BaseModel):
+    hours: int
+    total_events: int
+    total_failures: int
+    failure_rate: float
+    alert_triggered: bool
+    by_metric_type: list[WorkerMetricItem]
+
+
+class RetentionMaintenanceRequest(BaseModel):
+    older_than_days: int = Field(default=90, ge=1, le=3650)
+    anonymize_notifications: bool = True
+    anonymize_flags: bool = True
+    delete_old_bandit_logs: bool = False
+
+
+class RetentionMaintenanceResponse(BaseModel):
+    notifications_anonymized: int
+    flags_anonymized: int
+    bandit_logs_deleted: int
+
+
+class SafetyEscalationEventItem(BaseModel):
+    id: int
+    safety_flag_id: int | None
+    user_id: str
+    escalation_status: str
+    channel: str
+    status: str
+    detail: str | None
+    created_at: datetime
+
+
+class AdminPermissionUpdateRequest(BaseModel):
+    role: str = Field(default="admin", min_length=3, max_length=64)
+    permissions: list[str] = Field(default_factory=list, max_length=50)
+
+
+class AdminPermissionProfile(BaseModel):
+    user_id: str
+    role: str
+    permissions: list[str]
 
 
 class ActionAnalyticsItem(BaseModel):

@@ -45,10 +45,13 @@ export type SessionCompleteResponse = {
 
 export type AuthTokenResponse = {
   access_token: string;
+  refresh_token: string | null;
   token_type: "bearer";
   user_id: string;
   anonymous: boolean;
   is_admin: boolean;
+  role: string;
+  permissions: string[];
 };
 
 export type AnonymousAuthResponse = AuthTokenResponse & {
@@ -59,6 +62,8 @@ export type MeResponse = {
   user_id: string;
   anonymous: boolean;
   is_admin: boolean;
+  role: string;
+  permissions: string[];
   created_at: string;
 };
 
@@ -178,6 +183,28 @@ export type NotificationAnalyticsResponse = {
   by_status: NotificationAnalyticsBucket[];
   by_source: NotificationAnalyticsBucket[];
   by_channel: NotificationChannelAnalyticsItem[];
+  by_day: NotificationAnalyticsBucket[];
+  failure_reasons: NotificationAnalyticsBucket[];
+};
+
+export type WorkerMetricItem = {
+  metric_type: string;
+  count: number;
+};
+
+export type WorkerMetricsResponse = {
+  hours: number;
+  total_events: number;
+  total_failures: number;
+  failure_rate: number;
+  alert_triggered: boolean;
+  by_metric_type: WorkerMetricItem[];
+};
+
+export type RetentionMaintenanceResponse = {
+  notifications_anonymized: number;
+  flags_anonymized: number;
+  bandit_logs_deleted: number;
 };
 
 export type DeadLetterReplayAuditItem = {

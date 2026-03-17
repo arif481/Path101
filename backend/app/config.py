@@ -39,6 +39,7 @@ class Settings:
     jwt_secret: str
     jwt_algorithm: str
     jwt_expires_minutes: int
+    refresh_expires_days: int
     admin_email_allowlist: list[str]
     redis_url: str
     cors_origins: list[str]
@@ -56,6 +57,13 @@ class Settings:
     admin_rate_limit_window_seconds: int
     worker_max_retries: int
     notification_channels: list[str]
+    smtp_host: str
+    smtp_port: int
+    smtp_user: str
+    smtp_password: str
+    smtp_from_email: str
+    notification_webhook_url: str
+    worker_alert_failure_rate: float
 
 
 SETTINGS = Settings(
@@ -64,6 +72,7 @@ SETTINGS = Settings(
     jwt_secret=os.getenv("JWT_SECRET", "dev-only-change-me"),
     jwt_algorithm="HS256",
     jwt_expires_minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "10080")),
+    refresh_expires_days=int(os.getenv("REFRESH_EXPIRES_DAYS", "30")),
     admin_email_allowlist=parse_csv(os.getenv("ADMIN_EMAIL_ALLOWLIST"), []),
     redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
     cors_origins=parse_csv(
@@ -87,6 +96,13 @@ SETTINGS = Settings(
     admin_rate_limit_window_seconds=int(os.getenv("ADMIN_RATE_LIMIT_WINDOW_SECONDS", "60")),
     worker_max_retries=int(os.getenv("WORKER_MAX_RETRIES", "3")),
     notification_channels=parse_csv(os.getenv("NOTIFICATION_CHANNELS"), ["in_app", "email"]),
+    smtp_host=os.getenv("SMTP_HOST", ""),
+    smtp_port=int(os.getenv("SMTP_PORT", "587")),
+    smtp_user=os.getenv("SMTP_USER", ""),
+    smtp_password=os.getenv("SMTP_PASSWORD", ""),
+    smtp_from_email=os.getenv("SMTP_FROM_EMAIL", ""),
+    notification_webhook_url=os.getenv("NOTIFICATION_WEBHOOK_URL", ""),
+    worker_alert_failure_rate=parse_float(os.getenv("WORKER_ALERT_FAILURE_RATE", "0.20"), 0.20),
 )
 
 
@@ -112,6 +128,7 @@ DATABASE_URL = SETTINGS.database_url
 JWT_SECRET = SETTINGS.jwt_secret
 JWT_ALGORITHM = SETTINGS.jwt_algorithm
 JWT_EXPIRES_MINUTES = SETTINGS.jwt_expires_minutes
+REFRESH_EXPIRES_DAYS = SETTINGS.refresh_expires_days
 ADMIN_EMAIL_ALLOWLIST = [value.strip().lower() for value in SETTINGS.admin_email_allowlist]
 REDIS_URL = SETTINGS.redis_url
 CORS_ORIGINS = SETTINGS.cors_origins
@@ -129,3 +146,10 @@ ADMIN_RATE_LIMIT_COUNT = SETTINGS.admin_rate_limit_count
 ADMIN_RATE_LIMIT_WINDOW_SECONDS = SETTINGS.admin_rate_limit_window_seconds
 WORKER_MAX_RETRIES = SETTINGS.worker_max_retries
 NOTIFICATION_CHANNELS = [value.strip().lower() for value in SETTINGS.notification_channels]
+SMTP_HOST = SETTINGS.smtp_host
+SMTP_PORT = SETTINGS.smtp_port
+SMTP_USER = SETTINGS.smtp_user
+SMTP_PASSWORD = SETTINGS.smtp_password
+SMTP_FROM_EMAIL = SETTINGS.smtp_from_email
+NOTIFICATION_WEBHOOK_URL = SETTINGS.notification_webhook_url
+WORKER_ALERT_FAILURE_RATE = SETTINGS.worker_alert_failure_rate

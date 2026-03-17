@@ -13,11 +13,15 @@ from app.models.db_models import (
     NotificationLog,
     Plan,
     SafetyFlag,
+    SafetyEscalationEvent,
     SessionRecord,
     User,
+    WorkerMetric,
 )
 from app.schemas import (
     ActionAnalyticsItem,
+    AdminPermissionProfile,
+    AdminPermissionUpdateRequest,
     DeadLetterBulkDropRequest,
     DeadLetterBulkDropResponse,
     BanditAnalyticsResponse,
@@ -40,12 +44,18 @@ from app.schemas import (
     SafetyFlagAnalyticsBucket,
     SafetyFlagAnalyticsResponse,
     SchedulerTickResponse,
+    SafetyEscalationEventItem,
+    RetentionMaintenanceRequest,
+    RetentionMaintenanceResponse,
     TriageFlagRequest,
     UserAnalyticsItem,
     UserAnalyticsResponse,
+    WorkerMetricItem,
+    WorkerMetricsResponse,
     WorkerEventItem,
 )
-from app.security import admin_rate_limit, get_current_admin_user
+from app.config import WORKER_ALERT_FAILURE_RATE
+from app.security import admin_rate_limit, get_current_admin_user, require_admin_permission
 from app.services.redis_queue import (
     drop_dead_letter_job,
     drop_dead_letter_jobs,
@@ -58,9 +68,53 @@ from app.services.redis_queue import (
     summarize_dead_letter_jobs,
 )
 from app.services.notification_service import get_notification_analytics, send_user_notification
+from app.services.safety_escalation import create_safety_escalation_event
+from app.services.worker_metrics import record_worker_metric
 from app.worker import run_scheduler_tick
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+@router.get(
+    "/rbac/{user_id}",
+    response_model=AdminPermissionProfile,
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("maintenance:write"))],
+)
+def admin_get_rbac(user_id: str, db: Session = Depends(get_db)) -> AdminPermissionProfile:
+    account = db.get(User, user_id)
+    if account is None or account.auth_account is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    auth_account = account.auth_account
+    permissions_json = auth_account.permissions_json if isinstance(auth_account.permissions_json, dict) else {}
+    permissions = permissions_json.get("permissions") if isinstance(permissions_json, dict) else []
+    normalized = [str(item).strip().lower() for item in (permissions or []) if str(item).strip()]
+
+    return AdminPermissionProfile(user_id=user_id, role=auth_account.role or "admin", permissions=normalized)
+
+
+@router.post(
+    "/rbac/{user_id}",
+    response_model=AdminPermissionProfile,
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("maintenance:write"))],
+)
+def admin_set_rbac(
+    user_id: str,
+    payload: AdminPermissionUpdateRequest,
+    db: Session = Depends(get_db),
+) -> AdminPermissionProfile:
+    user = db.get(User, user_id)
+    if user is None or user.auth_account is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    account = user.auth_account
+    account.is_admin = True
+    account.role = payload.role.strip().lower() or "admin"
+    permissions = [item.strip().lower() for item in payload.permissions if item.strip()]
+    account.permissions_json = {"permissions": permissions}
+    db.add(account)
+    db.commit()
+    return AdminPermissionProfile(user_id=user_id, role=account.role, permissions=permissions)
 
 
 def _parse_iso_datetime(value: object) -> datetime | None:
@@ -77,7 +131,11 @@ def _parse_iso_datetime(value: object) -> datetime | None:
         return None
 
 
-@router.get("/flags", response_model=list[SafetyFlagItem], dependencies=[Depends(admin_rate_limit)])
+@router.get(
+    "/flags",
+    response_model=list[SafetyFlagItem],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("flags:read"))],
+)
 def list_flags(
     review_status: str | None = None,
     db: Session = Depends(get_db),
@@ -104,7 +162,10 @@ def list_flags(
     ]
 
 
-@router.post("/flag/{flag_id}/resolve", dependencies=[Depends(admin_rate_limit)])
+@router.post(
+    "/flag/{flag_id}/resolve",
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("flags:write"))],
+)
 def resolve_flag(
     flag_id: int,
     payload: ResolveFlagRequest,
@@ -125,7 +186,10 @@ def resolve_flag(
     return {"status": "ok"}
 
 
-@router.post("/flag/{flag_id}/triage", dependencies=[Depends(admin_rate_limit)])
+@router.post(
+    "/flag/{flag_id}/triage",
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("flags:write"))],
+)
 def triage_flag(
     flag_id: int,
     payload: TriageFlagRequest,
@@ -142,6 +206,14 @@ def triage_flag(
     row.reviewed_at = datetime.utcnow()
     row.reviewer_user_id = admin_user.id
     db.add(row)
+    if payload.escalation_status in {"escalated", "urgent"}:
+        create_safety_escalation_event(
+            db,
+            user_id=row.user_id,
+            escalation_status=payload.escalation_status,
+            detail=payload.triage_notes or "Admin escalation",
+            safety_flag_id=row.id,
+        )
     db.commit()
 
     return SafetyFlagItem(
@@ -158,7 +230,11 @@ def triage_flag(
     )
 
 
-@router.get("/flags/analytics", response_model=SafetyFlagAnalyticsResponse, dependencies=[Depends(admin_rate_limit)])
+@router.get(
+    "/flags/analytics",
+    response_model=SafetyFlagAnalyticsResponse,
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("analytics:read"))],
+)
 def flag_analytics(db: Session = Depends(get_db)) -> SafetyFlagAnalyticsResponse:
     total_flags = int(db.scalar(select(func.count(SafetyFlag.id))) or 0)
     avg_severity = float(db.scalar(select(func.avg(SafetyFlag.severity_score))) or 0.0)
@@ -186,13 +262,21 @@ def flag_analytics(db: Session = Depends(get_db)) -> SafetyFlagAnalyticsResponse
     )
 
 
-@router.get("/queue-health", response_model=QueueHealthResponse, dependencies=[Depends(admin_rate_limit)])
+@router.get(
+    "/queue-health",
+    response_model=QueueHealthResponse,
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("worker:read"))],
+)
 def admin_queue_health() -> QueueHealthResponse:
     health = queue_health()
     return QueueHealthResponse(**health)
 
 
-@router.get("/dead-letter-jobs", response_model=list[DeadLetterJobItem], dependencies=[Depends(admin_rate_limit)])
+@router.get(
+    "/dead-letter-jobs",
+    response_model=list[DeadLetterJobItem],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("dead_letter:read"))],
+)
 def admin_dead_letter_jobs(
     limit: int = 50,
     offset: int = 0,
@@ -236,14 +320,18 @@ def admin_dead_letter_jobs(
 @router.get(
     "/dead-letter-summary",
     response_model=DeadLetterSummaryResponse,
-    dependencies=[Depends(admin_rate_limit)],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("dead_letter:read"))],
 )
 def admin_dead_letter_summary() -> DeadLetterSummaryResponse:
     summary = summarize_dead_letter_jobs()
     return DeadLetterSummaryResponse(**summary)
 
 
-@router.get("/notifications", response_model=list[NotificationLogItem], dependencies=[Depends(admin_rate_limit)])
+@router.get(
+    "/notifications",
+    response_model=list[NotificationLogItem],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("notifications:read"))],
+)
 def admin_notification_logs(
     limit: int = 50,
     offset: int = 0,
@@ -283,7 +371,7 @@ def admin_notification_logs(
 @router.post(
     "/notifications/test-send",
     response_model=NotificationSendResponse,
-    dependencies=[Depends(admin_rate_limit)],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("notifications:write"))],
 )
 def admin_notification_test_send(
     payload: NotificationSendRequest,
@@ -304,7 +392,7 @@ def admin_notification_test_send(
 @router.get(
     "/notifications/analytics",
     response_model=NotificationAnalyticsResponse,
-    dependencies=[Depends(admin_rate_limit)],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("analytics:read"))],
 )
 def admin_notification_analytics(
     days: int = 30,
@@ -313,7 +401,10 @@ def admin_notification_analytics(
     return NotificationAnalyticsResponse(**get_notification_analytics(db, days=days))
 
 
-@router.get("/notifications/analytics.csv", dependencies=[Depends(admin_rate_limit)])
+@router.get(
+    "/notifications/analytics.csv",
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("analytics:read"))],
+)
 def admin_notification_analytics_csv(
     days: int = 30,
     db: Session = Depends(get_db),
@@ -348,6 +439,10 @@ def admin_notification_analytics_csv(
                 item["delivery_rate"],
             ]
         )
+    for item in analytics["by_day"]:
+        writer.writerow(["day", item["key"], item["count"], "", "", ""])
+    for item in analytics["failure_reasons"]:
+        writer.writerow(["failure_reason", item["key"], item["count"], "", "", ""])
 
     csv_data = output.getvalue()
     output.close()
@@ -382,7 +477,7 @@ def _record_dead_letter_replay_audit(
 @router.post(
     "/dead-letter-jobs/{dead_letter_id}/replay",
     response_model=DeadLetterReplayResponse,
-    dependencies=[Depends(admin_rate_limit)],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("dead_letter:write"))],
 )
 def admin_replay_dead_letter_job(
     dead_letter_id: str,
@@ -413,7 +508,7 @@ def admin_replay_dead_letter_job(
 @router.post(
     "/dead-letter-jobs/{dead_letter_id}/drop",
     response_model=DeadLetterDropResponse,
-    dependencies=[Depends(admin_rate_limit)],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("dead_letter:write"))],
 )
 def admin_drop_dead_letter_job(
     dead_letter_id: str,
@@ -446,7 +541,7 @@ def admin_drop_dead_letter_job(
 @router.post(
     "/dead-letter-jobs/drop-bulk",
     response_model=DeadLetterBulkDropResponse,
-    dependencies=[Depends(admin_rate_limit)],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("dead_letter:write"))],
 )
 def admin_drop_dead_letter_jobs_bulk(
     payload: DeadLetterBulkDropRequest,
@@ -485,7 +580,7 @@ def admin_drop_dead_letter_jobs_bulk(
 @router.post(
     "/dead-letter-jobs/purge",
     response_model=DeadLetterPurgeResponse,
-    dependencies=[Depends(admin_rate_limit)],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("maintenance:write"))],
 )
 def admin_purge_dead_letter_jobs(
     payload: DeadLetterPurgeRequest,
@@ -517,7 +612,7 @@ def admin_purge_dead_letter_jobs(
 @router.post(
     "/dead-letter-jobs/replay-bulk",
     response_model=DeadLetterBulkReplayResponse,
-    dependencies=[Depends(admin_rate_limit)],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("dead_letter:write"))],
 )
 def admin_replay_dead_letter_jobs_bulk(
     payload: DeadLetterBulkReplayRequest,
@@ -562,7 +657,7 @@ def admin_replay_dead_letter_jobs_bulk(
 @router.get(
     "/dead-letter-replays",
     response_model=list[DeadLetterReplayAuditItem],
-    dependencies=[Depends(admin_rate_limit)],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("dead_letter:read"))],
 )
 def admin_dead_letter_replays(limit: int = 50, db: Session = Depends(get_db)) -> list[DeadLetterReplayAuditItem]:
     return _admin_dead_letter_replays_filtered(limit=limit, offset=0, db=db)
@@ -610,7 +705,7 @@ def _admin_dead_letter_replays_filtered(
 @router.get(
     "/dead-letter-replays/filter",
     response_model=list[DeadLetterReplayAuditItem],
-    dependencies=[Depends(admin_rate_limit)],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("dead_letter:read"))],
 )
 def admin_dead_letter_replays_filtered(
     limit: int = 50,
@@ -632,7 +727,10 @@ def admin_dead_letter_replays_filtered(
     )
 
 
-@router.get("/dead-letter-replays.csv", dependencies=[Depends(admin_rate_limit)])
+@router.get(
+    "/dead-letter-replays.csv",
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("dead_letter:read"))],
+)
 def admin_dead_letter_replays_csv(limit: int = 100, db: Session = Depends(get_db)) -> Response:
     rows = admin_dead_letter_replays(limit=limit, db=db)
 
@@ -669,7 +767,11 @@ def admin_dead_letter_replays_csv(limit: int = 100, db: Session = Depends(get_db
     )
 
 
-@router.get("/worker-events", response_model=list[WorkerEventItem], dependencies=[Depends(admin_rate_limit)])
+@router.get(
+    "/worker-events",
+    response_model=list[WorkerEventItem],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("worker:read"))],
+)
 def admin_worker_events(limit: int = 25, db: Session = Depends(get_db)) -> list[WorkerEventItem]:
     safe_limit = max(1, min(limit, 200))
     statement = select(BanditLog).order_by(BanditLog.timestamp.desc()).limit(safe_limit)
@@ -699,13 +801,134 @@ def admin_worker_events(limit: int = 25, db: Session = Depends(get_db)) -> list[
     return response
 
 
-@router.post("/scheduler/tick", response_model=SchedulerTickResponse, dependencies=[Depends(admin_rate_limit)])
+@router.post(
+    "/scheduler/tick",
+    response_model=SchedulerTickResponse,
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("scheduler:run"))],
+)
 def admin_scheduler_tick() -> SchedulerTickResponse:
     result = run_scheduler_tick()
     return SchedulerTickResponse(**result)
 
 
-@router.get("/analytics/actions", response_model=BanditAnalyticsResponse, dependencies=[Depends(admin_rate_limit)])
+@router.get(
+    "/worker-metrics",
+    response_model=WorkerMetricsResponse,
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("worker:read"))],
+)
+def admin_worker_metrics(hours: int = 24, db: Session = Depends(get_db)) -> WorkerMetricsResponse:
+    safe_hours = max(1, min(hours, 24 * 30))
+    cutoff = datetime.utcnow() - timedelta(hours=safe_hours)
+
+    grouped_rows = db.execute(
+        select(WorkerMetric.metric_type, func.count(WorkerMetric.id))
+        .where(WorkerMetric.created_at >= cutoff)
+        .group_by(WorkerMetric.metric_type)
+    ).all()
+
+    by_metric_type = [
+        WorkerMetricItem(metric_type=str(metric_type), count=int(count or 0))
+        for metric_type, count in grouped_rows
+    ]
+    total_events = sum(item.count for item in by_metric_type)
+    total_failures = sum(
+        item.count for item in by_metric_type if item.metric_type in {"job_failed", "job_dead_lettered"}
+    )
+    failure_rate = (total_failures / total_events) if total_events > 0 else 0.0
+
+    return WorkerMetricsResponse(
+        hours=safe_hours,
+        total_events=total_events,
+        total_failures=total_failures,
+        failure_rate=round(failure_rate, 6),
+        alert_triggered=failure_rate >= WORKER_ALERT_FAILURE_RATE,
+        by_metric_type=by_metric_type,
+    )
+
+
+@router.get(
+    "/safety-escalations",
+    response_model=list[SafetyEscalationEventItem],
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("flags:read"))],
+)
+def admin_safety_escalations(limit: int = 100, db: Session = Depends(get_db)) -> list[SafetyEscalationEventItem]:
+    safe_limit = max(1, min(limit, 500))
+    rows = db.scalars(
+        select(SafetyEscalationEvent)
+        .order_by(SafetyEscalationEvent.created_at.desc())
+        .limit(safe_limit)
+    ).all()
+    return [
+        SafetyEscalationEventItem(
+            id=row.id,
+            safety_flag_id=row.safety_flag_id,
+            user_id=row.user_id,
+            escalation_status=row.escalation_status,
+            channel=row.channel,
+            status=row.status,
+            detail=row.detail,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post(
+    "/maintenance/retention",
+    response_model=RetentionMaintenanceResponse,
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("maintenance:write"))],
+)
+def admin_maintenance_retention(
+    payload: RetentionMaintenanceRequest,
+    db: Session = Depends(get_db),
+) -> RetentionMaintenanceResponse:
+    cutoff = datetime.utcnow() - timedelta(days=payload.older_than_days)
+
+    notifications_anonymized = 0
+    flags_anonymized = 0
+    bandit_logs_deleted = 0
+
+    if payload.anonymize_notifications:
+        notification_rows = db.scalars(
+            select(NotificationLog).where(NotificationLog.created_at < cutoff)
+        ).all()
+        for row in notification_rows:
+            row.user_id = "anonymized"
+            db.add(row)
+            notifications_anonymized += 1
+
+    if payload.anonymize_flags:
+        flag_rows = db.scalars(select(SafetyFlag).where(SafetyFlag.created_at < cutoff)).all()
+        for row in flag_rows:
+            row.user_id = "anonymized"
+            row.raw_text_encrypted = "[redacted]"
+            db.add(row)
+            flags_anonymized += 1
+
+    if payload.delete_old_bandit_logs:
+        result = db.execute(delete(BanditLog).where(BanditLog.timestamp < cutoff))
+        bandit_logs_deleted = int(result.rowcount or 0)
+
+    record_worker_metric(
+        db,
+        metric_type="maintenance_retention_run",
+        value=1.0,
+        detail=f"days={payload.older_than_days}",
+    )
+
+    db.commit()
+    return RetentionMaintenanceResponse(
+        notifications_anonymized=notifications_anonymized,
+        flags_anonymized=flags_anonymized,
+        bandit_logs_deleted=bandit_logs_deleted,
+    )
+
+
+@router.get(
+    "/analytics/actions",
+    response_model=BanditAnalyticsResponse,
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("analytics:read"))],
+)
 def admin_action_analytics(
     days: int = 30,
     limit: int = 20,
@@ -748,7 +971,10 @@ def admin_action_analytics(
     return BanditAnalyticsResponse(days=safe_days, total_events=total_events, actions=actions)
 
 
-@router.get("/analytics/actions.csv", dependencies=[Depends(admin_rate_limit)])
+@router.get(
+    "/analytics/actions.csv",
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("analytics:read"))],
+)
 def admin_action_analytics_csv(
     days: int = 30,
     limit: int = 20,
@@ -798,7 +1024,11 @@ def _compute_reward_trend(rewards: list[float]) -> str:
     return "flat"
 
 
-@router.get("/analytics/users", response_model=UserAnalyticsResponse, dependencies=[Depends(admin_rate_limit)])
+@router.get(
+    "/analytics/users",
+    response_model=UserAnalyticsResponse,
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("analytics:read"))],
+)
 def admin_user_analytics(
     days: int = 30,
     limit: int = 20,
@@ -868,7 +1098,10 @@ def admin_user_analytics(
     return UserAnalyticsResponse(days=safe_days, total_users=len(rows), users=rows)
 
 
-@router.get("/analytics/users.csv", dependencies=[Depends(admin_rate_limit)])
+@router.get(
+    "/analytics/users.csv",
+    dependencies=[Depends(admin_rate_limit), Depends(require_admin_permission("analytics:read"))],
+)
 def admin_user_analytics_csv(
     days: int = 30,
     limit: int = 20,

@@ -25,6 +25,7 @@ from app.services.redis_queue import (
     enqueue_session_job,
     requeue_session_job,
 )
+from app.services.worker_metrics import record_worker_metric
 
 logger = logging.getLogger("path101.worker")
 
@@ -93,6 +94,12 @@ def process_job(job: dict[str, Any]) -> bool:
                 },
             )
             if notification.status != "delivered":
+                record_worker_metric(
+                    db,
+                    metric_type="job_failed",
+                    value=1.0,
+                    detail=f"type={job_type};reason=notification_failed",
+                )
                 db.rollback()
                 logger.warning("Notification failed for session_nudge user_id=%s", user_id)
                 return False
@@ -106,6 +113,7 @@ def process_job(job: dict[str, Any]) -> bool:
             timestamp=datetime.utcnow(),
         )
         db.add(bandit_log)
+        record_worker_metric(db, metric_type="job_processed", value=1.0, detail=f"type={job_type}")
         db.commit()
         logger.info("Processed %s for user_id=%s action_id=%s", job_type, user_id, action_id)
         return True
@@ -161,6 +169,14 @@ def run_scheduler_tick() -> dict[str, int]:
         if scheduled:
             logger.info("Scheduler enqueued session_nudge jobs=%s", scheduled)
 
+        record_worker_metric(
+            db,
+            metric_type="scheduler_tick",
+            value=float(scheduled),
+            detail=f"scanned={scanned};locks={locked};enqueued={scheduled}",
+        )
+        db.commit()
+
         return {
             "scanned_sessions": scanned,
             "acquired_locks": locked,
@@ -196,6 +212,17 @@ def run_worker(poll_sleep_seconds: float = 1.0) -> None:
             if current_attempt < max(WORKER_MAX_RETRIES, 0):
                 requeued = requeue_session_job(job, reason="job_processing_failed")
                 if requeued:
+                    metric_db = SessionLocal()
+                    try:
+                        record_worker_metric(
+                            metric_db,
+                            metric_type="job_requeued",
+                            value=1.0,
+                            detail=f"type={job.get('job_type')};attempt={current_attempt + 1}",
+                        )
+                        metric_db.commit()
+                    finally:
+                        metric_db.close()
                     logger.warning(
                         "Requeued failed job type=%s user_id=%s attempt=%s",
                         job.get("job_type"),
@@ -207,6 +234,17 @@ def run_worker(poll_sleep_seconds: float = 1.0) -> None:
             else:
                 dead_lettered = enqueue_dead_letter(job, reason="max_retries_exceeded")
                 if dead_lettered:
+                    metric_db = SessionLocal()
+                    try:
+                        record_worker_metric(
+                            metric_db,
+                            metric_type="job_dead_lettered",
+                            value=1.0,
+                            detail=f"type={job.get('job_type')};attempt={current_attempt}",
+                        )
+                        metric_db.commit()
+                    finally:
+                        metric_db.close()
                     logger.error(
                         "Dead-lettered job type=%s user_id=%s attempt=%s",
                         job.get("job_type"),

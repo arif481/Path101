@@ -103,6 +103,10 @@ GitHub Actions runs both backend and frontend checks on push/PR to `main`.
 - `POST /auth/anonymous`
 - `POST /auth/register`
 - `POST /auth/login`
+- `POST /auth/refresh`
+- `POST /auth/logout`
+- `POST /auth/password-reset/request`
+- `POST /auth/password-reset/confirm`
 - `GET /auth/me`
 - `POST /intake`
 - `GET /plan/{user_id}`
@@ -110,6 +114,7 @@ GitHub Actions runs both backend and frontend checks on push/PR to `main`.
 - `GET /admin/flags` (requires admin Bearer token)
 - `POST /admin/flag/{id}/resolve` (requires admin Bearer token)
 - `POST /admin/flag/{id}/triage` (requires admin Bearer token)
+- `GET /admin/safety-escalations` (requires admin Bearer token + permission)
 - `GET /admin/flags/analytics` (requires admin Bearer token)
 - `GET /admin/queue-health` (requires admin Bearer token)
 - `GET /admin/notifications` (requires admin Bearer token)
@@ -125,6 +130,9 @@ GitHub Actions runs both backend and frontend checks on push/PR to `main`.
 - `GET /admin/dead-letter-replays` and `GET /admin/dead-letter-replays.csv` (requires admin Bearer token)
 - `GET /admin/dead-letter-replays/filter` (requires admin Bearer token)
 - `GET /admin/analytics/actions` and `GET /admin/analytics/users` (requires admin Bearer token)
+- `GET /admin/worker-metrics` (requires admin Bearer token + permission)
+- `POST /admin/maintenance/retention` (requires admin Bearer token + permission)
+- `GET /admin/rbac/{user_id}` and `POST /admin/rbac/{user_id}` (requires admin Bearer token + permission)
 - `GET /health`
 
 ## Notes
@@ -132,7 +140,11 @@ GitHub Actions runs both backend and frontend checks on push/PR to `main`.
 - Current storage is SQLAlchemy-backed (`sqlite` by default, PostgreSQL-ready via `DATABASE_URL`).
 - Crisis-like language triggers triage messaging and safety flag behavior stub.
 - Safety triage now includes severity scoring with escalation statuses (`none`, `watch`, `escalated`, `urgent`) and admin review lifecycle fields.
-- Notification analytics now includes delivery-rate, channel, source, and status breakdowns with CSV export.
+- Notification delivery now supports concrete channel handlers (`in_app`, `email` via SMTP, `webhook`) with persisted failures.
+- Notification analytics includes delivery-rate plus channel/source/status/day/failure-reason breakdowns with CSV export.
+- Auth now includes refresh-token rotation, logout revocation, and password-reset token lifecycle.
+- Admin RBAC is scoped by role+permissions and enforced per endpoint.
+- Worker metrics and retention maintenance endpoints support operational alerts and data lifecycle controls.
 
 ## Deploy (Render blueprint)
 

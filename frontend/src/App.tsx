@@ -12,11 +12,15 @@ import {
   getUserAnalytics,
   authAnonymous,
   authLogin,
+  authLogout,
+  authRefresh,
   authMe,
   authRegister,
+  confirmPasswordReset,
   completeSession,
   getAdminQueueHealth,
   getNotificationAnalytics,
+  getWorkerMetrics,
   listSafetyFlags,
   listDeadLetterJobs,
   listDeadLetterReplays,
@@ -30,6 +34,8 @@ import {
   submitIntake,
   triggerSchedulerTick,
   listNotificationLogs,
+  requestPasswordReset,
+  runRetentionMaintenance,
 } from "./api";
 import type {
   BanditAnalyticsResponse,
@@ -38,6 +44,7 @@ import type {
   DeadLetterSummaryResponse,
   NotificationLogItem,
   NotificationAnalyticsResponse,
+  RetentionMaintenanceResponse,
   AnonymousAuthResponse,
   AuthTokenResponse,
   IntakeResponse,
@@ -47,10 +54,12 @@ import type {
   SafetyFlagItem,
   SessionCompleteResponse,
   UserAnalyticsResponse,
+  WorkerMetricsResponse,
   WorkerEventItem,
 } from "./types";
 
 const TOKEN_KEY = "path101.token";
+const REFRESH_TOKEN_KEY = "path101.refresh_token";
 const USER_KEY = "path101.user";
 const ANON_KEY = "path101.anonymous";
 const ADMIN_POLL_KEY = "path101.admin.poll_mode";
@@ -58,6 +67,7 @@ const ADMIN_FLAG_FILTER_KEY = "path101.admin.flag_filter";
 
 export function App() {
   const [authToken, setAuthToken] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [anonymous, setAnonymous] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -78,6 +88,12 @@ export function App() {
   const [purgeLimit, setPurgeLimit] = useState(500);
   const [notificationLogs, setNotificationLogs] = useState<NotificationLogItem[]>([]);
   const [notificationAnalytics, setNotificationAnalytics] = useState<NotificationAnalyticsResponse | null>(null);
+  const [workerMetrics, setWorkerMetrics] = useState<WorkerMetricsResponse | null>(null);
+  const [retentionResult, setRetentionResult] = useState<RetentionMaintenanceResponse | null>(null);
+  const [retentionDays, setRetentionDays] = useState(90);
+  const [deleteOldBanditLogs, setDeleteOldBanditLogs] = useState(false);
+  const [passwordResetToken, setPasswordResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [notificationOffset, setNotificationOffset] = useState(0);
   const [notificationUserFilter, setNotificationUserFilter] = useState("");
   const [notificationChannelFilter, setNotificationChannelFilter] = useState("");
@@ -113,6 +129,7 @@ export function App() {
 
   useEffect(() => {
     const storedToken = localStorage.getItem(TOKEN_KEY);
+    const storedRefreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
     const storedUser = localStorage.getItem(USER_KEY);
     const storedAnon = localStorage.getItem(ANON_KEY);
     const storedPollMode = localStorage.getItem(ADMIN_POLL_KEY);
@@ -123,6 +140,7 @@ export function App() {
     }
 
     setAuthToken(storedToken);
+    setRefreshToken(storedRefreshToken);
     setAdminToken(storedToken);
     setUserId(storedUser);
     setAnonymous(storedAnon === "true");
@@ -139,8 +157,18 @@ export function App() {
       .then((me) => {
         setIsAdmin(me.is_admin);
       })
-      .catch(() => {
-        clearSession();
+      .catch(async () => {
+        if (!storedRefreshToken) {
+          clearSession();
+          return;
+        }
+
+        try {
+          const refreshed = await authRefresh(storedRefreshToken);
+          persistSession(refreshed);
+        } catch {
+          clearSession();
+        }
       });
   }, []);
 
@@ -222,24 +250,40 @@ export function App() {
 
   function persistSession(result: AuthTokenResponse | AnonymousAuthResponse) {
     setAuthToken(result.access_token);
+    setRefreshToken(result.refresh_token);
     setAdminToken(result.access_token);
     setUserId(result.user_id);
     setAnonymous(result.anonymous);
     setIsAdmin(result.is_admin);
     localStorage.setItem(TOKEN_KEY, result.access_token);
+    if (result.refresh_token) {
+      localStorage.setItem(REFRESH_TOKEN_KEY, result.refresh_token);
+    }
     localStorage.setItem(USER_KEY, result.user_id);
     localStorage.setItem(ANON_KEY, String(result.anonymous));
   }
 
   function clearSession() {
     setAuthToken(null);
+    setRefreshToken(null);
     setAdminToken("");
     setUserId(null);
     setAnonymous(false);
     setIsAdmin(false);
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
     localStorage.removeItem(ANON_KEY);
+  }
+
+  async function onSignOut() {
+    if (refreshToken) {
+      try {
+        await authLogout(refreshToken);
+      } catch {
+      }
+    }
+    clearSession();
   }
 
   async function loadDeadLetterJobsForAdmin(key: string) {
@@ -1081,6 +1125,84 @@ export function App() {
     }
   }
 
+  async function onLoadWorkerMetrics() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const result = await getWorkerMetrics(adminToken.trim(), 24);
+      setWorkerMetrics(result);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onRunRetentionMaintenance() {
+    if (!adminToken.trim()) {
+      setError("Admin token is required.");
+      return;
+    }
+
+    setAdminLoading(true);
+    setError(null);
+    try {
+      const result = await runRetentionMaintenance(adminToken.trim(), {
+        olderThanDays: retentionDays,
+        anonymizeNotifications: true,
+        anonymizeFlags: true,
+        deleteOldBanditLogs,
+      });
+      setRetentionResult(result);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function onRequestPasswordReset() {
+    if (!email.trim()) {
+      setError("Email is required for reset.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await requestPasswordReset(email.trim());
+      if (result.reset_token) {
+        setPasswordResetToken(result.reset_token);
+      }
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onConfirmPasswordReset() {
+    if (!passwordResetToken.trim() || !newPassword.trim()) {
+      setError("Reset token and new password are required.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await confirmPasswordReset(passwordResetToken.trim(), newPassword);
+      setPasswordResetToken("");
+      setNewPassword("");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <main className="layout">
       <section className="card">
@@ -1090,7 +1212,7 @@ export function App() {
             <p>
               Signed in as <strong>{userId}</strong> ({anonymous ? "anonymous" : "registered"})
             </p>
-            <button type="button" onClick={clearSession} disabled={loading}>
+            <button type="button" onClick={() => void onSignOut()} disabled={loading}>
               Sign out
             </button>
           </div>
@@ -1149,6 +1271,32 @@ export function App() {
                 Login
               </button>
             </form>
+
+            <div className="stack">
+              <h3>Password Reset</h3>
+              <button type="button" onClick={onRequestPasswordReset} disabled={loading}>
+                Request Reset Token
+              </button>
+              <label>
+                Reset token
+                <input
+                  value={passwordResetToken}
+                  onChange={(event) => setPasswordResetToken(event.target.value)}
+                  placeholder="Paste reset token"
+                />
+              </label>
+              <label>
+                New password
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                />
+              </label>
+              <button type="button" onClick={onConfirmPasswordReset} disabled={loading}>
+                Confirm Password Reset
+              </button>
+            </div>
           </div>
         )}
       </section>
@@ -1802,6 +1950,30 @@ export function App() {
             <button type="button" onClick={onDownloadNotificationAnalyticsCsv} disabled={adminLoading}>
               {adminLoading ? "Loading..." : "Download Notification CSV"}
             </button>
+            <button type="button" onClick={onLoadWorkerMetrics} disabled={adminLoading}>
+              {adminLoading ? "Loading..." : "Load Worker Metrics"}
+            </button>
+            <label>
+              Retention days
+              <input
+                type="number"
+                min={1}
+                max={3650}
+                value={retentionDays}
+                onChange={(event) => setRetentionDays(Number(event.target.value || 90))}
+              />
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={deleteOldBanditLogs}
+                onChange={(event) => setDeleteOldBanditLogs(event.target.checked)}
+              />
+              Delete old bandit logs
+            </label>
+            <button type="button" onClick={onRunRetentionMaintenance} disabled={adminLoading}>
+              {adminLoading ? "Loading..." : "Run Retention Maintenance"}
+            </button>
           </div>
 
           {notificationAnalytics && (
@@ -1848,7 +2020,57 @@ export function App() {
                   ))}
                 </ul>
               )}
+              <p className="subtle">By day:</p>
+              {notificationAnalytics.by_day.length === 0 ? (
+                <p className="subtle">No day buckets available.</p>
+              ) : (
+                <ul>
+                  {notificationAnalytics.by_day.map((item) => (
+                    <li key={`notif-day-${item.key}`}>
+                      {item.key}: {item.count}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="subtle">Failure reasons:</p>
+              {notificationAnalytics.failure_reasons.length === 0 ? (
+                <p className="subtle">No failure reasons available.</p>
+              ) : (
+                <ul>
+                  {notificationAnalytics.failure_reasons.map((item) => (
+                    <li key={`notif-failure-${item.key}`}>
+                      {item.key}: {item.count}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
+          )}
+
+          {workerMetrics && (
+            <div className="top-gap">
+              <p>
+                Worker metrics (last {workerMetrics.hours}h): {workerMetrics.total_events} events, failures {workerMetrics.total_failures}, rate {(workerMetrics.failure_rate * 100).toFixed(1)}%
+              </p>
+              <p>{workerMetrics.alert_triggered ? "Alert: failure rate threshold exceeded" : "No worker failure alert"}</p>
+              {workerMetrics.by_metric_type.length === 0 ? (
+                <p className="subtle">No worker metric events available.</p>
+              ) : (
+                <ul>
+                  {workerMetrics.by_metric_type.map((item) => (
+                    <li key={`worker-metric-${item.metric_type}`}>
+                      {item.metric_type}: {item.count}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {retentionResult && (
+            <p>
+              Retention run: notifications anonymized {retentionResult.notifications_anonymized}, flags anonymized {retentionResult.flags_anonymized}, bandit logs deleted {retentionResult.bandit_logs_deleted}
+            </p>
           )}
 
           {analyticsResult && (

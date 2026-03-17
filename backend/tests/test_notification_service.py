@@ -73,7 +73,7 @@ def test_get_notification_analytics_breakdowns(monkeypatch) -> None:
         send_user_notification(
             db=db,
             user_id="u2",
-            channel="email",
+            channel="in_app",
             message="b",
             source="admin_test_send",
         )
@@ -102,8 +102,7 @@ def test_get_notification_analytics_breakdowns(monkeypatch) -> None:
         assert by_source.get("admin_test_send") == 1
 
         by_channel = {item["channel"]: item for item in analytics["by_channel"]}
-        assert by_channel["in_app"]["delivered"] == 1
-        assert by_channel["email"]["delivered"] == 1
+        assert by_channel["in_app"]["delivered"] == 2
         assert by_channel["sms"]["failed"] == 1
     finally:
         db.close()

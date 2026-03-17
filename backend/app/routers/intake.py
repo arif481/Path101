@@ -6,6 +6,7 @@ from app.schemas import IntakeRequest, IntakeResponse
 from app.services.intake import compile_plan
 from app.services.persistence import add_safety_flag, save_plan
 from app.services.redis_queue import enqueue_session_job
+from app.services.safety_escalation import create_safety_escalation_event
 from app.services.safety_triage import evaluate_safety_text
 
 router = APIRouter(prefix="/intake", tags=["intake"])
@@ -16,7 +17,7 @@ def intake(payload: IntakeRequest, db: Session = Depends(get_db)) -> IntakeRespo
     triage = evaluate_safety_text(payload.text)
     if bool(triage.get("triggered")):
         plan_preview, _ = compile_plan(payload.user_id, payload.text, payload.available_times)
-        add_safety_flag(
+        row = add_safety_flag(
             db,
             payload.user_id,
             payload.text,
@@ -25,6 +26,14 @@ def intake(payload: IntakeRequest, db: Session = Depends(get_db)) -> IntakeRespo
             escalation_status=str(triage.get("escalation_status") or "none"),
             triage_notes=str(triage.get("triage_message") or "") or None,
         )
+        if str(triage.get("escalation_status") or "none") in {"escalated", "urgent"}:
+            create_safety_escalation_event(
+                db,
+                user_id=payload.user_id,
+                escalation_status=str(triage.get("escalation_status") or "escalated"),
+                detail=str(triage.get("triage_message") or "Safety escalation triggered"),
+                safety_flag_id=row.id,
+            )
         db.commit()
         return IntakeResponse(
             plan_preview=plan_preview,

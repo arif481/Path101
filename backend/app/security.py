@@ -23,6 +23,20 @@ from app.models.db_models import AuthAccount, User
 from app.services.rate_limiter import rate_limiter
 
 
+ADMIN_PERMISSION_GROUPS = {
+    "flags:read",
+    "flags:write",
+    "dead_letter:read",
+    "dead_letter:write",
+    "notifications:read",
+    "notifications:write",
+    "analytics:read",
+    "scheduler:run",
+    "maintenance:write",
+    "worker:read",
+}
+
+
 class AuthError(HTTPException):
     def __init__(self, detail: str = "Unauthorized") -> None:
         super().__init__(status_code=401, detail=detail)
@@ -99,6 +113,35 @@ def get_current_admin_user(
         raise AuthError("Admin privileges required")
 
     return user
+
+
+def get_admin_role_permissions(account: AuthAccount | None) -> tuple[str, list[str]]:
+    if account is None or not account.is_admin:
+        return ("user", [])
+
+    role = (account.role or "admin").strip().lower()
+    configured = account.permissions_json if isinstance(account.permissions_json, dict) else {}
+    permission_values = configured.get("permissions") if isinstance(configured, dict) else None
+    permissions = [str(item).strip().lower() for item in (permission_values or []) if str(item).strip()]
+    if not permissions:
+        permissions = sorted(ADMIN_PERMISSION_GROUPS)
+    return (role, permissions)
+
+
+def require_admin_permission(permission: str):
+    permission_key = permission.strip().lower()
+
+    def _check(
+        admin_user: User = Depends(get_current_admin_user),
+        db: Session = Depends(get_db),
+    ) -> User:
+        account = db.get(AuthAccount, admin_user.id)
+        _, permissions = get_admin_role_permissions(account)
+        if permission_key not in set(permissions):
+            raise HTTPException(status_code=403, detail="Admin permission denied")
+        return admin_user
+
+    return _check
 
 
 def _request_client_key(request: Request) -> str:
