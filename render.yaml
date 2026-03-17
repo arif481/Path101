@@ -17,16 +17,32 @@ services:
         sync: false
       - key: JWT_EXPIRES_MINUTES
         value: "10080"
+      - key: REFRESH_EXPIRES_DAYS
+        value: "30"
       - key: ADMIN_EMAIL_ALLOWLIST
         sync: false
       - key: REDIS_URL
         sync: false
       - key: NOTIFICATION_CHANNELS
-        value: "in_app,email"
+        value: "in_app,email,webhook"
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: NOTIFICATION_WEBHOOK_URL
+        sync: false
       - key: CORS_ORIGINS
         sync: false
       - key: TRUSTED_HOSTS
         sync: false
+      - key: WORKER_ALERT_FAILURE_RATE
+        value: "0.20"
 
   - type: worker
     name: path101-worker
@@ -57,8 +73,22 @@ services:
         value: "3"
       - key: WORKER_MAX_RETRIES
         value: "3"
+      - key: WORKER_ALERT_FAILURE_RATE
+        value: "0.20"
       - key: NOTIFICATION_CHANNELS
-        value: "in_app,email"
+        value: "in_app,email,webhook"
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: NOTIFICATION_WEBHOOK_URL
+        sync: false
       - key: JWT_SECRET
         sync: false
       - key: ADMIN_EMAIL_ALLOWLIST

@@ -172,13 +172,28 @@ For `path101-api`:
 - `APP_ENV` = `production`
 - `AUTO_MIGRATE` = `false` (recommended in production)
 - `JWT_SECRET` = long random string
+- `JWT_EXPIRES_MINUTES` = access token lifetime (default `10080`)
+- `REFRESH_EXPIRES_DAYS` = refresh token lifetime (default `30`)
 - `ADMIN_EMAIL_ALLOWLIST` = comma-separated admin login emails (e.g. `admin@yourdomain.com`)
 - `REDIS_URL` = your Redis instance URL
+- `NOTIFICATION_CHANNELS` = e.g. `in_app,email,webhook`
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL` (required for email channel)
+- `NOTIFICATION_WEBHOOK_URL` (required for webhook channel)
+- `WORKER_ALERT_FAILURE_RATE` = e.g. `0.20`
 - `CORS_ORIGINS` = frontend URL(s), comma-separated (e.g. `https://path101-web.onrender.com`)
 - `TRUSTED_HOSTS` = backend host(s), comma-separated (e.g. `path101-api.onrender.com`)
 
 For `path101-web`:
 - `VITE_API_BASE_URL` = deployed backend URL (e.g. `https://path101-api.onrender.com`)
+
+For `path101-worker`:
+- Use the same `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ADMIN_EMAIL_ALLOWLIST`
+- Keep scheduler and retry defaults unless tuning:
+	- `SCHEDULER_INTERVAL_SECONDS=60`
+	- `NUDGE_LOOKAHEAD_MINUTES=30`
+	- `NUDGE_LOOKBACK_HOURS=24`
+	- `NUDGE_LOCK_TTL_SECONDS=86400`
+	- `WORKER_MAX_RETRIES=3`
 
 ### 4) Redeploy frontend after setting `VITE_API_BASE_URL`
 
@@ -200,3 +215,14 @@ For `path101-web`:
 - CORS and trusted hosts are environment-driven (`CORS_ORIGINS`, `TRUSTED_HOSTS`).
 - Request rate limiting is Redis-backed when `REDIS_URL` is available, with in-memory fallback for local resilience.
 - Worker nudge jobs emit notification delivery logs (`delivered`/`failed`) based on `NOTIFICATION_CHANNELS`.
+
+## Pre-launch smoke test checklist
+
+- `GET /health` returns `{"status":"ok"}`.
+- Register/login works and returns both `access_token` and `refresh_token`.
+- `POST /auth/refresh` rotates refresh token successfully.
+- Intake creates plan preview and session completion works.
+- Admin can load flags/queue/dead-letter/notification analytics.
+- `POST /admin/scheduler/tick` works and worker consumes jobs.
+- Notification analytics CSV downloads successfully.
+- `POST /admin/maintenance/retention` runs successfully with test parameters.
