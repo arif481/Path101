@@ -1,125 +1,57 @@
-<div align="center">
+# Path101
 
-# 🧭 Path101
+Path101 is an AI-generated student success operating system.
 
-**AI-powered personal growth companion for students**
+It is meant to build whatever a student needs to achieve a goal: roadmap, execution system, study structure, habit support, wellbeing support, progress visuals, and adaptive check-ins. Mental health is part of the product when it affects capacity, but the app is not a mental-health-only tool.
 
-[![CI](https://github.com/arif481/Path101/actions/workflows/ci.yml/badge.svg)](https://github.com/arif481/Path101/actions/workflows/ci.yml)
-[![Firebase](https://img.shields.io/badge/Powered%20by-Firebase-FFCA28?logo=firebase)](https://firebase.google.com)
-[![Gemini](https://img.shields.io/badge/Gemini%202.5-Flash-4285F4?logo=google)](https://aistudio.google.com)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?logo=typescript)](https://www.typescriptlang.org)
+## Product direction
 
-**[Live App →](https://path101.web.app)**
+Path101 should:
 
-</div>
+- understand the student across goals, time, pressure, habits, energy, and support needs
+- generate a custom workspace instead of forcing a fixed feature flow
+- keep progress highly visual with milestone arcs, action lanes, and momentum signals
+- adapt the system over time through check-ins and AI insight
 
----
+## Current app shape
 
-## What is Path101?
+The frontend now centers on four layers:
 
-Path101 is an **AI-first behavior-change platform** that helps students overcome procrastination, anxiety, and poor study habits through personalized micro-sessions powered by **Google Gemini AI**.
+1. Goal intake
+2. AI analysis of the student context
+3. Generated workspace with milestones, actions, modules, and progress dials
+4. Adaptive support through check-ins and chat
 
-Unlike template-based apps, **everything is generated dynamically** based on what you tell it. No pre-made plans, no generic advice — just real, personalized guidance.
+## Stack
 
-### How it works
+- React + TypeScript + Vite
+- Firebase Auth
+- Cloud Firestore
+- Gemini 2.5 Flash
 
-```
-You share what's going on
-        ↓
-🧠 AI deeply analyzes your concerns, emotional state, and severity
-        ↓
-📋 Generates a fully personalized multi-week plan with specific sessions
-        ↓
-🏃 Guides you through each session step with real-time AI coaching
-        ↓
-🪞 Provides personalized reflection, mood interpretation, and journal prompts
-        ↓
-📊 Tracks your progress and gives AI-powered insights over time
-```
+## Key files
 
-### Features
-
-| Feature | Description |
-|---|---|
-| 🧠 **AI Analysis** | Gemini understands your concerns, emotional state, and severity |
-| 📋 **Dynamic Plans** | Every plan is unique — generated from your specific situation |
-| 🏃 **Guided Sessions** | Step-by-step AI coaching during each micro-session |
-| 🪞 **AI Reflections** | Personalized insights, mood interpretation, and journal prompts |
-| 📊 **Progress Tracking** | AI-analyzed trends, strengths, and focus areas |
-| 💬 **AI Chat** | Talk to Path101 anytime for advice and support |
-| 🛡️ **Safety Detection** | Crisis language triggers immediate safety resources |
-| 🔐 **Auth** | Google, email/password, or anonymous sign-in |
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────┐
-│              Browser (React + TypeScript)        │
-│                                                  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
-│  │ Firebase  │  │ Gemini   │  │  Firestore   │  │
-│  │   Auth    │  │ 2.0 Flash│  │  (Database)  │  │
-│  └──────────┘  └──────────┘  └──────────────┘  │
-└─────────────────────────────────────────────────┘
+```text
+frontend/src/
+├── App.tsx                         # Main student OS experience
+├── styles.css                      # Visual system, layout, motion, responsive design
+├── types/workspace.ts              # Shared workspace contracts
+└── firebase/services/
+    ├── aiService.ts                # AI analysis, workspace generation, insight, chat
+    └── firestoreOps.ts             # Firestore persistence for workspaces and progress
 ```
 
-**100% client-side** — no backend server. All AI calls go directly to Gemini API. All data persists in Firestore with security rules.
-
-**Cost: $0/month** (Firebase Spark plan + Gemini free tier)
-
----
-
-## Project Structure
-
-```
-Path101/
-├── frontend/                 # React + TypeScript + Vite
-│   └── src/
-│       ├── App.tsx           # Main app (7 AI-driven views)
-│       ├── styles.css        # Premium dark-mode design system
-│       └── firebase/
-│           ├── config.ts     # Firebase initialization
-│           ├── authService.ts # Auth (Google, email, anonymous)
-│           ├── useAuth.ts    # React auth hook
-│           └── services/
-│               ├── aiService.ts       # 🧠 Gemini AI core engine
-│               ├── firestoreOps.ts    # Database operations
-│               ├── safetyService.ts   # Crisis detection
-│               ├── intakeService.ts   # Intake helpers
-│               ├── banditService.ts   # Recommendation engine
-│               └── adminService.ts    # Admin operations
-├── firebase/
-│   ├── firestore.rules       # Security rules (13 collections)
-│   └── firestore.indexes.json
-├── .github/workflows/
-│   ├── ci.yml                # CI: test + build
-│   └── scheduler-tick.yml    # Cron scheduler (optional)
-└── scripts/
-    └── scheduler-tick.ts     # Nudge scheduler (GitHub Actions)
-```
-
----
-
-## Quick Start
-
-### 1. Clone & install
+## Local development
 
 ```bash
-git clone https://github.com/arif481/Path101.git
-cd Path101/frontend
+cd frontend
 npm install
+npm run dev
 ```
 
-### 2. Configure environment
+## Environment
 
-```bash
-cp .env.example .env
-```
-
-Fill in your keys:
+Create `frontend/.env` from `frontend/.env.example` and provide:
 
 ```env
 VITE_FIREBASE_API_KEY=...
@@ -128,35 +60,37 @@ VITE_FIREBASE_PROJECT_ID=...
 VITE_FIREBASE_STORAGE_BUCKET=...
 VITE_FIREBASE_MESSAGING_SENDER_ID=...
 VITE_FIREBASE_APP_ID=...
-VITE_GEMINI_API_KEY=...       # Free from aistudio.google.com
+VITE_FIREBASE_MEASUREMENT_ID=...
+VITE_GEMINI_API_KEY=...
 VITE_USE_FIREBASE=true
 ```
 
-### 3. Run locally
+If `VITE_GEMINI_API_KEY` is missing, the app falls back to deterministic local workspace generation so the UI still works in development.
+
+## Testing
 
 ```bash
-npm run dev
-```
-
-### 4. Deploy
-
-```bash
+cd frontend
+npm run typecheck
+npm run test
 npm run build
-cp -r dist ../firebase/public
-cd ../firebase && firebase deploy --only hosting
 ```
 
----
+## Firestore model
 
-## Security
+Primary collections:
 
-- **Firestore Rules** — 13 collections with owner-based access control
-- **Auth** — Firebase Auth SDK (Google, email/password, anonymous)
-- **API Keys** — All sensitive keys stored in GitHub Secrets and `.env` (gitignored)
-- **Safety** — AI-powered crisis detection with safety escalation pipeline
+- `users`
+- `authProfiles`
+- `workspaces`
+- `checkIns`
+- `progressEvents`
+- `safetyFlags`
+- `safetyEscalationEvents`
+- `notificationLogs`
 
----
+## Notes
 
-## License
-
-MIT © [arif481](https://github.com/arif481)
+- The workspace is intentionally generated from reusable primitives rather than a hard-coded product menu.
+- Firestore rules in `firebase/firestore.rules` are aligned to the new `workspaces/checkIns/progressEvents` model.
+- The old counseling-first flow has been replaced by a broader student-goal system.

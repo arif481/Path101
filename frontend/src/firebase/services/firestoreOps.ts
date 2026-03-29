@@ -1,31 +1,31 @@
 /**
- * Firestore CRUD operations — replaces backend/app/services/persistence.py
- *
- * Read/write helpers for plans, sessions, safety flags, bandit logs,
- * notification logs, and other collections.
+ * Firestore operations for Path101's dynamic student workspace model.
  */
 
 import {
+  addDoc,
   collection,
   doc,
-  setDoc,
   getDoc,
   getDocs,
-  addDoc,
-  updateDoc,
-  query,
-  where,
-  orderBy,
   limit,
+  orderBy,
+  query,
   serverTimestamp,
-  type Timestamp,
+  setDoc,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "../config";
-import type { PlanPreview, SessionPlan } from "./intakeService";
+import type {
+  AIStudentAnalysis,
+  AIWorkspace,
+  ProgressCheckIn,
+  StoredWorkspace,
+  StudentProfileInput,
+} from "../../types/workspace";
 
-// ── User ────────────────────────────────────────────────────
-
-export async function ensureUser(userId: string): Promise<void> {
+async function ensureUser(userId: string): Promise<void> {
   const ref = doc(db, "users", userId);
   const snap = await getDoc(ref);
   if (snap.exists()) return;
@@ -37,93 +37,86 @@ export async function ensureUser(userId: string): Promise<void> {
   });
 }
 
-// ── Plans ───────────────────────────────────────────────────
-
-export async function savePlan(userId: string, plan: PlanPreview): Promise<void> {
+export async function saveWorkspace(
+  userId: string,
+  profile: StudentProfileInput,
+  analysis: AIStudentAnalysis,
+  workspace: AIWorkspace
+): Promise<string> {
   await ensureUser(userId);
 
-  // Save plan document
-  await setDoc(doc(db, "plans", plan.planId), {
+  const workspaceRef = await addDoc(collection(db, "workspaces"), {
     userId,
-    planJson: plan,
-    startDate: serverTimestamp(),
-    endDate: null,
-    currentWeek: plan.currentWeek,
+    profile,
+    analysis,
+    workspaceJson: workspace,
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   });
 
-  // Save the initial session document
-  const session = plan.nextSession;
-  await setDoc(doc(db, "sessions", session.sessionId), {
-    planId: plan.planId,
-    userId,
-    sessionType: "micro",
-    scheduledAt: session.scheduledAt ?? null,
-    completedBool: false,
-    preMood: null,
-    postMood: null,
-    feedback: null,
-    createdAt: serverTimestamp(),
-  });
+  return workspaceRef.id;
 }
 
-export type StoredPlan = {
-  planId: string;
-  userId: string;
-  planJson: PlanPreview;
-  currentWeek: number;
-  startDate: Timestamp;
-};
-
-export async function getLatestPlan(userId: string): Promise<StoredPlan | null> {
-  const q = query(
-    collection(db, "plans"),
+export async function getLatestWorkspace(userId: string): Promise<StoredWorkspace | null> {
+  const workspaceQuery = query(
+    collection(db, "workspaces"),
     where("userId", "==", userId),
-    orderBy("startDate", "desc"),
+    orderBy("updatedAt", "desc"),
     limit(1)
   );
-  const snapshot = await getDocs(q);
+  const snapshot = await getDocs(workspaceQuery);
+
   if (snapshot.empty) return null;
 
-  const docSnap = snapshot.docs[0];
-  const data = docSnap.data();
-  return {
-    planId: docSnap.id,
-    userId: data.userId,
-    planJson: data.planJson as PlanPreview,
-    currentWeek: data.currentWeek,
-    startDate: data.startDate,
-  };
-}
-
-// ── Sessions ────────────────────────────────────────────────
-
-export async function completeSession(
-  sessionId: string,
-  preMood: number,
-  postMood: number,
-  feedback: string
-): Promise<{ userId: string; planId: string } | null> {
-  const ref = doc(db, "sessions", sessionId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return null;
-
-  const data = snap.data();
-  await updateDoc(ref, {
-    completedBool: true,
-    preMood,
-    postMood,
-    feedback,
-    completedAt: serverTimestamp(),
-  });
+  const latest = snapshot.docs[0];
+  const data = latest.data();
 
   return {
+    workspaceId: latest.id,
     userId: data.userId as string,
-    planId: data.planId as string,
+    profile: data.profile as StudentProfileInput,
+    analysis: data.analysis as AIStudentAnalysis,
+    workspace: data.workspaceJson as AIWorkspace,
   };
 }
 
-// ── Safety flags ────────────────────────────────────────────
+export async function updateWorkspace(
+  workspaceId: string,
+  workspace: AIWorkspace
+): Promise<void> {
+  await updateDoc(doc(db, "workspaces", workspaceId), {
+    workspaceJson: workspace,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function saveCheckIn(
+  userId: string,
+  workspaceId: string,
+  checkIn: ProgressCheckIn
+): Promise<void> {
+  await addDoc(collection(db, "checkIns"), {
+    userId,
+    workspaceId,
+    ...checkIn,
+    createdAt: serverTimestamp(),
+  });
+}
+
+export async function recordProgressEvent(
+  userId: string,
+  workspaceId: string,
+  eventType: "action_completed" | "action_reopened" | "checkin_logged",
+  payload: Record<string, unknown>
+): Promise<void> {
+  await addDoc(collection(db, "progressEvents"), {
+    userId,
+    workspaceId,
+    eventType,
+    payload,
+    createdAt: serverTimestamp(),
+  });
+}
 
 export async function addSafetyFlag(
   userId: string,
@@ -138,7 +131,7 @@ export async function addSafetyFlag(
     triggerType,
     severityScore,
     escalationStatus,
-    rawTextEncrypted: rawText,
+    rawText,
     reviewStatus: "pending",
     triageNotes: triageNotes ?? null,
     reviewedAt: null,
@@ -160,78 +153,6 @@ export async function createSafetyEscalationEvent(
     escalationStatus,
     channel: "in_app",
     status: "created",
-    detail,
-    createdAt: serverTimestamp(),
-  });
-}
-
-// ── Bandit logs ─────────────────────────────────────────────
-
-export async function addBanditLog(
-  userId: string,
-  contextJson: Record<string, unknown>,
-  actionId: string,
-  policyVersion: string,
-  reward: number
-): Promise<void> {
-  await addDoc(collection(db, "banditLogs"), {
-    userId,
-    contextJson,
-    actionId,
-    policyVersion,
-    reward,
-    timestamp: serverTimestamp(),
-  });
-}
-
-// ── Notification logs (in-app) ──────────────────────────────
-
-export async function addNotificationLog(
-  userId: string,
-  channel: string,
-  message: string,
-  source: string,
-  status: "delivered" | "failed",
-  errorDetail: string | null = null
-): Promise<void> {
-  await addDoc(collection(db, "notificationLogs"), {
-    userId,
-    channel,
-    status,
-    source,
-    message,
-    metadataJson: {},
-    errorDetail,
-    createdAt: serverTimestamp(),
-  });
-}
-
-// ── Task queue (replaces Redis queue) ───────────────────────
-
-export async function enqueueTask(
-  jobType: string,
-  userId: string,
-  payload: Record<string, unknown>
-): Promise<void> {
-  await addDoc(collection(db, "taskQueue"), {
-    jobType,
-    userId,
-    payload,
-    attempt: 0,
-    createdAt: serverTimestamp(),
-  });
-}
-
-// ── Worker metrics ──────────────────────────────────────────
-
-export async function recordWorkerMetric(
-  metricType: string,
-  value: number,
-  detail: string | null = null
-): Promise<void> {
-  await addDoc(collection(db, "workerMetrics"), {
-    metricType,
-    value,
     detail,
     createdAt: serverTimestamp(),
   });
