@@ -4,6 +4,9 @@ export type StudentProfileInput = {
   weeklyCapacity: string;
   currentReality: string;
   supportNeeds: string;
+  successDefinition?: string;
+  biggestBlocker?: string;
+  studentMode?: string;
 };
 
 export type AIStudentAnalysis = {
@@ -17,6 +20,11 @@ export type AIStudentAnalysis = {
   supportModes: string[];
   mentalHealthConsiderations: string[];
   energyProfile: string;
+  diagnosticHeadline?: string;
+  operatingMode?: string;
+  riskLevel?: "stable" | "watch" | "critical";
+  leveragePoints?: string[];
+  expertNotes?: string[];
   safetyAlert: string | null;
 };
 
@@ -43,6 +51,8 @@ export type ProgressMetric = {
   value: number;
   targetLabel: string;
   insight: string;
+  trend?: "up" | "steady" | "down";
+  deltaLabel?: string;
 };
 
 export type WorkspaceMilestoneStatus = "queued" | "active" | "at_risk" | "complete";
@@ -79,6 +89,14 @@ export type WorkspaceCheckInPrompt = {
   prompts: string[];
 };
 
+export type WorkspaceFocusMode = {
+  id: string;
+  title: string;
+  trigger: string;
+  description: string;
+  moves: string[];
+};
+
 export type AIWorkspace = {
   workspaceTitle: string;
   workspaceSubtitle: string;
@@ -91,6 +109,9 @@ export type AIWorkspace = {
   milestones: WorkspaceMilestone[];
   actions: WorkspaceAction[];
   checkIns: WorkspaceCheckInPrompt[];
+  weeklyBlueprint?: string[];
+  adaptiveRules?: string[];
+  focusModes?: WorkspaceFocusMode[];
 };
 
 export type ProgressCheckIn = {
@@ -107,6 +128,7 @@ export type AIProgressInsight = {
   wins: string[];
   friction: string[];
   nextMove: string;
+  adjustments?: string[];
 };
 
 export type StoredWorkspace = {

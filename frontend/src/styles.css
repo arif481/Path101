@@ -52,7 +52,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -620,6 +621,51 @@ textarea.form-input {
   max-width: 58ch;
 }
 
+.hero-signal-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.signal-chip {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.54));
+  border: 1px solid rgba(25, 50, 74, 0.08);
+}
+
+.signal-chip span {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+}
+
+.signal-chip strong {
+  font-family: "Sora", sans-serif;
+  letter-spacing: -0.03em;
+  font-size: 0.98rem;
+}
+
+.risk-text.stable {
+  text-transform: capitalize;
+  color: var(--success);
+}
+
+.risk-text.watch {
+  text-transform: capitalize;
+  color: var(--warning);
+}
+
+.risk-text.critical {
+  text-transform: capitalize;
+  color: var(--danger);
+}
+
 .hero-actions {
   display: flex;
   gap: 12px;
@@ -687,6 +733,15 @@ textarea.form-input {
   margin: 10px 0 8px;
 }
 
+.diagnostic-headline {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(15, 139, 141, 0.11), rgba(255, 122, 89, 0.09));
+  border: 1px solid rgba(25, 50, 74, 0.06);
+  font-weight: 700;
+}
+
 .summary-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -702,6 +757,80 @@ textarea.form-input {
   font-size: 0.9rem;
   text-transform: uppercase;
   letter-spacing: 0.12em;
+  color: var(--text-muted);
+}
+
+.journey-panel {
+  overflow: hidden;
+}
+
+.journey-rail {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.journey-line {
+  position: absolute;
+  top: 34px;
+  left: 24px;
+  right: 24px;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(15, 139, 141, 0.18), rgba(255, 122, 89, 0.2));
+}
+
+.journey-stop {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  text-align: left;
+  padding: 0;
+}
+
+.journey-node {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  border-radius: 999px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(25, 50, 74, 0.08);
+  overflow: hidden;
+  box-shadow: 0 12px 24px rgba(23, 40, 56, 0.08);
+}
+
+.journey-node::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(15, 139, 141, 0.08), rgba(255, 122, 89, 0.08));
+}
+
+.journey-node-fill {
+  position: absolute;
+  inset: auto 8px 8px;
+  border-radius: 999px 999px 18px 18px;
+  background: linear-gradient(180deg, var(--brand), var(--accent));
+  transition: height 320ms ease;
+}
+
+.journey-stop.selected .journey-node {
+  transform: translateY(-2px) scale(1.02);
+  border-color: rgba(15, 139, 141, 0.24);
+}
+
+.journey-title {
+  font-family: "Sora", sans-serif;
+  letter-spacing: -0.03em;
+}
+
+.journey-stop small {
   color: var(--text-muted);
 }
 
@@ -743,8 +872,41 @@ textarea.form-input {
   align-content: start;
 }
 
+.metric-topline {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.trend-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 800;
+}
+
+.trend-pill.up {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.trend-pill.steady {
+  background: rgba(25, 50, 74, 0.08);
+  color: var(--text-soft);
+}
+
+.trend-pill.down {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
 .metric-copy h3,
 .lane-column h3,
+.focus-mode-card h3,
 .module-card h3,
 .milestone-card h3,
 .action-card h4 {
@@ -949,6 +1111,34 @@ textarea.form-input {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.focus-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.focus-mode-card {
+  padding: 20px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(15, 139, 141, 0.08), rgba(255, 255, 255, 0.82));
+  border: 1px solid rgba(25, 50, 74, 0.08);
+  display: grid;
+  gap: 12px;
+}
+
+.focus-mode-topline span,
+.mini-section-label {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 800;
+}
+
+.mini-section-label {
+  margin-top: 4px;
+}
+
 .module-card {
   padding: 20px;
   border-radius: 24px;
@@ -1007,6 +1197,10 @@ input[type="range"] {
 .mini-list.warning div,
 .next-move {
   background: rgba(255, 122, 89, 0.08);
+}
+
+.mini-list.success div {
+  background: rgba(47, 133, 90, 0.08);
 }
 
 .next-move {
@@ -1076,6 +1270,35 @@ input[type="range"] {
 
 .chat-text {
   white-space: pre-wrap;
+}
+
+.chat-suggestion-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.chat-suggestion-row.compact {
+  justify-content: flex-start;
+  margin-top: 16px;
+}
+
+.chat-suggestion {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(25, 50, 74, 0.08);
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.chat-suggestion:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(15, 139, 141, 0.24);
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .chat-input-row {
@@ -1174,7 +1397,9 @@ input[type="range"] {
   .milestone-grid,
   .action-lanes,
   .module-grid,
-  .summary-columns {
+  .summary-columns,
+  .hero-signal-strip,
+  .focus-mode-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1205,6 +1430,8 @@ input[type="range"] {
   .milestone-grid,
   .action-lanes,
   .module-grid,
+  .focus-mode-grid,
+  .hero-signal-strip,
   .summary-columns,
   .outcome-list,
   .milestone-action-strip {
@@ -1225,6 +1452,10 @@ input[type="range"] {
 
   .chat-input-row {
     grid-template-columns: 1fr;
+  }
+
+  .journey-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .navbar-actions {

@@ -17,6 +17,7 @@ import type {
   StudentProfileInput,
   WorkspaceAction,
   WorkspaceActionStatus,
+  WorkspaceFocusMode,
   WorkspaceMilestone,
   WorkspaceModule,
 } from "./types/workspace";
@@ -36,6 +37,9 @@ const emptyProfile: StudentProfileInput = {
   weeklyCapacity: "8-10 focused hours per week",
   currentReality: "",
   supportNeeds: "",
+  successDefinition: "",
+  biggestBlocker: "",
+  studentMode: "Balanced momentum",
 };
 
 const emptyCheckIn: CheckInDraft = {
@@ -196,7 +200,15 @@ function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
   );
 }
 
-function MetricDial({ label, value, targetLabel, insight }: AIWorkspace["metrics"][number]) {
+function MetricDial({
+  label,
+  value,
+  targetLabel,
+  insight,
+  trend = "steady",
+  deltaLabel = "Live signal",
+}: AIWorkspace["metrics"][number]) {
+
   return (
     <div className="metric-card">
       <div
@@ -208,12 +220,85 @@ function MetricDial({ label, value, targetLabel, insight }: AIWorkspace["metrics
         </div>
       </div>
       <div className="metric-copy">
+        <div className="metric-topline">
+          <span className={`trend-pill ${trend}`}>{deltaLabel}</span>
+        </div>
         <h3>{label}</h3>
         <p>{insight}</p>
         <span>{targetLabel}</span>
       </div>
     </div>
   );
+}
+
+function FocusModeCard({ mode }: { mode: WorkspaceFocusMode }) {
+  return (
+    <article className="focus-mode-card">
+      <div className="focus-mode-topline">
+        <span>{mode.trigger}</span>
+      </div>
+      <h3>{mode.title}</h3>
+      <p>{mode.description}</p>
+      <div className="mini-list">
+        {mode.moves.map((move) => (
+          <div key={move}>{move}</div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function JourneyRail({
+  milestones,
+  selectedMilestoneId,
+  onSelect,
+}: {
+  milestones: WorkspaceMilestone[];
+  selectedMilestoneId: string | null;
+  onSelect: (milestoneId: string) => void;
+}) {
+  return (
+    <article className="surface-card journey-panel">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Trajectory</span>
+          <h2>The path is visible</h2>
+        </div>
+        <span className="section-meta">{milestones.length} step arc</span>
+      </div>
+
+      <div className="journey-rail">
+        <div className="journey-line" />
+        {milestones.map((milestone, index) => (
+          <button
+            key={milestone.id}
+            type="button"
+            className={`journey-stop ${selectedMilestoneId === milestone.id ? "selected" : ""} ${milestone.status}`}
+            style={{ "--stop-order": index } as CSSProperties}
+            onClick={() => onSelect(milestone.id)}
+          >
+            <span className="journey-node">
+              <span className="journey-node-fill" style={{ height: `${milestone.completionPercent}%` }} />
+            </span>
+            <span className="journey-title">{milestone.title}</span>
+            <small>{milestone.dueLabel}</small>
+          </button>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function normalizeAnalysis(analysis: AIStudentAnalysis): AIStudentAnalysis {
+  return {
+    ...analysis,
+    diagnosticHeadline:
+      analysis.diagnosticHeadline ?? "This student needs clarity, survivable momentum, and sharp next moves.",
+    operatingMode: analysis.operatingMode ?? "Balanced momentum mode",
+    riskLevel: analysis.riskLevel ?? "stable",
+    leveragePoints: analysis.leveragePoints ?? analysis.priorities.slice(0, 3),
+    expertNotes: analysis.expertNotes ?? analysis.blindSpots,
+  };
 }
 
 function ModuleCard({ module }: { module: WorkspaceModule }) {
@@ -346,7 +431,12 @@ function synchronizeWorkspace(workspace: AIWorkspace): AIWorkspace {
         : index === 0
           ? Math.max(metric.value, Math.round((completion + 40) / 1.4))
           : metric.value;
-    return { ...metric, value: Math.min(100, value) };
+    return {
+      ...metric,
+      value: Math.min(100, value),
+      trend: metric.trend ?? (completion >= 50 ? "up" : index === 1 ? "steady" : "up"),
+      deltaLabel: metric.deltaLabel ?? (completion >= 50 ? "Building well" : "Calibrating"),
+    };
   });
 
   const momentumLabel =
@@ -361,6 +451,9 @@ function synchronizeWorkspace(workspace: AIWorkspace): AIWorkspace {
     milestones,
     metrics,
     momentumLabel,
+    weeklyBlueprint: workspace.weeklyBlueprint ?? [],
+    adaptiveRules: workspace.adaptiveRules ?? [],
+    focusModes: workspace.focusModes ?? [],
   };
 }
 
@@ -420,6 +513,18 @@ export function App() {
     [workspace]
   );
 
+  const chatSuggestions = useMemo(() => {
+    const focusModePrompts =
+      workspace?.focusModes?.slice(0, 2).map((mode) => `Build me a ${mode.title.toLowerCase()} for today`) ?? [];
+
+    return [
+      "Simplify my next step",
+      "Help me plan this week",
+      ...focusModePrompts,
+      "I feel overloaded. Recalibrate my system",
+    ].slice(0, 4);
+  }, [workspace]);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
@@ -446,8 +551,8 @@ export function App() {
         }
 
         const synced = synchronizeWorkspace(stored.workspace);
-        setProfile(stored.profile);
-        setAnalysis(stored.analysis);
+        setProfile({ ...emptyProfile, ...stored.profile });
+        setAnalysis(normalizeAnalysis(stored.analysis));
         setWorkspace(synced);
         setWorkspaceId(stored.workspaceId);
         setSelectedMilestoneId(synced.milestones[0]?.id ?? null);
@@ -498,7 +603,7 @@ export function App() {
 
   function applyWorkspaceState(nextAnalysis: AIStudentAnalysis, nextWorkspace: AIWorkspace, nextWorkspaceId: string | null) {
     startTransition(() => {
-      setAnalysis(nextAnalysis);
+      setAnalysis(normalizeAnalysis(nextAnalysis));
       setWorkspace(nextWorkspace);
       setWorkspaceId(nextWorkspaceId);
       setProgressInsight(null);
@@ -607,12 +712,7 @@ export function App() {
     }
   }
 
-  async function handleChat(event: React.FormEvent) {
-    event.preventDefault();
-    if (!chatInput.trim()) return;
-
-    const outgoing = chatInput.trim();
-    setChatInput("");
+  async function runChat(outgoing: string) {
     setChatMessages((current) => [...current, { role: "user", text: outgoing }]);
     setLoading(true);
 
@@ -635,6 +735,15 @@ export function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleChat(event: React.FormEvent) {
+    event.preventDefault();
+    if (!chatInput.trim()) return;
+
+    const outgoing = chatInput.trim();
+    setChatInput("");
+    await runChat(outgoing);
   }
 
   function resetForNewWorkspace() {
@@ -783,6 +892,33 @@ export function App() {
                   </div>
                 </div>
 
+                <div className="form-split">
+                  <div className="form-group">
+                    <label className="form-label">System mode</label>
+                    <select
+                      className="form-input"
+                      aria-label="System mode"
+                      value={profile.studentMode}
+                      onChange={(event) => setProfile((current) => ({ ...current, studentMode: event.target.value }))}
+                    >
+                      <option>Balanced momentum</option>
+                      <option>Sprint mode</option>
+                      <option>Recovery-aware mode</option>
+                      <option>Rebuild mode</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">What would success look like soon?</label>
+                    <input
+                      className="form-input"
+                      aria-label="What would success look like soon?"
+                      value={profile.successDefinition}
+                      onChange={(event) => setProfile((current) => ({ ...current, successDefinition: event.target.value }))}
+                      placeholder="Example: finish two mock tests, ship one portfolio project, bring my weekly routine under control..."
+                    />
+                  </div>
+                </div>
+
                 <div className="form-group">
                   <label className="form-label">What does real life look like right now?</label>
                   <textarea
@@ -791,6 +927,17 @@ export function App() {
                     value={profile.currentReality}
                     onChange={(event) => setProfile((current) => ({ ...current, currentReality: event.target.value }))}
                     placeholder="Classes, deadlines, commute, family pressure, sleep issues, distractions, part-time work, energy dips..."
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">What is the biggest blocker right now?</label>
+                  <textarea
+                    className="form-input"
+                    aria-label="What is the biggest blocker right now?"
+                    value={profile.biggestBlocker}
+                    onChange={(event) => setProfile((current) => ({ ...current, biggestBlocker: event.target.value }))}
+                    placeholder="Example: inconsistent sleep, fear of starting, too many competing priorities, poor revision structure, emotional crash after bad days..."
                   />
                 </div>
 
@@ -840,6 +987,20 @@ export function App() {
                 <h1>{workspace.workspaceTitle}</h1>
                 <p className="workspace-subtitle">{workspace.workspaceSubtitle}</p>
                 <p className="workspace-strategy">{workspace.strategy}</p>
+                <div className="hero-signal-strip">
+                  <div className="signal-chip">
+                    <span>Mode</span>
+                    <strong>{analysis.operatingMode}</strong>
+                  </div>
+                  <div className="signal-chip">
+                    <span>Risk</span>
+                    <strong className={`risk-text ${analysis.riskLevel}`}>{analysis.riskLevel}</strong>
+                  </div>
+                  <div className="signal-chip">
+                    <span>Diagnosis</span>
+                    <strong>{analysis.diagnosticHeadline}</strong>
+                  </div>
+                </div>
                 <div className="hero-actions">
                   <button className="btn btn-primary" type="button" onClick={() => setView("chat")}>
                     Open AI support
@@ -872,6 +1033,7 @@ export function App() {
                 <span className="eyebrow">AI read</span>
                 <h2>{analysis.primaryGoal}</h2>
                 <p>{analysis.summary}</p>
+                <p className="diagnostic-headline">{analysis.diagnosticHeadline}</p>
               </div>
               <div className="summary-columns">
                 <div>
@@ -881,13 +1043,19 @@ export function App() {
                   ))}
                 </div>
                 <div>
-                  <strong>Constraints</strong>
-                  {analysis.constraints.map((item) => (
+                  <strong>Leverage points</strong>
+                  {(analysis.leveragePoints ?? analysis.constraints).map((item) => (
                     <span key={item}>{item}</span>
                   ))}
                 </div>
               </div>
             </section>
+
+            <JourneyRail
+              milestones={workspace.milestones}
+              selectedMilestoneId={selectedMilestone?.id ?? null}
+              onSelect={setSelectedMilestoneId}
+            />
 
             <section className="metric-grid">
               {workspace.metrics.map((metric) => (
@@ -941,6 +1109,22 @@ export function App() {
                           <span>{action.title}</span>
                           <strong>{action.status.replace("_", " ")}</strong>
                         </div>
+                      ))}
+                    </div>
+                  </article>
+                )}
+
+                {workspace.focusModes && workspace.focusModes.length > 0 && (
+                  <article className="surface-card">
+                    <div className="section-heading">
+                      <div>
+                        <span className="eyebrow">Expert modes</span>
+                        <h2>How the system adapts to different days</h2>
+                      </div>
+                    </div>
+                    <div className="focus-mode-grid">
+                      {workspace.focusModes.map((mode) => (
+                        <FocusModeCard key={mode.id} mode={mode} />
                       ))}
                     </div>
                   </article>
@@ -1008,7 +1192,45 @@ export function App() {
                       ))}
                     </div>
                   )}
+                  {(analysis.expertNotes?.length ?? 0) > 0 && (
+                    <>
+                      <div className="mini-section-label">Expert notes</div>
+                      <div className="mini-list">
+                        {analysis.expertNotes?.map((note) => (
+                          <div key={note}>{note}</div>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </article>
+
+                {((workspace.weeklyBlueprint?.length ?? 0) > 0 || (workspace.adaptiveRules?.length ?? 0) > 0) && (
+                  <article className="surface-card side-card">
+                    <div className="section-heading compact">
+                      <div>
+                        <span className="eyebrow">Operating system</span>
+                        <h2>Weekly blueprint</h2>
+                      </div>
+                    </div>
+                    {(workspace.weeklyBlueprint?.length ?? 0) > 0 && (
+                      <div className="mini-list">
+                        {workspace.weeklyBlueprint?.map((step) => (
+                          <div key={step}>{step}</div>
+                        ))}
+                      </div>
+                    )}
+                    {(workspace.adaptiveRules?.length ?? 0) > 0 && (
+                      <>
+                        <div className="mini-section-label">Adaptive rules</div>
+                        <div className="mini-list warning">
+                          {workspace.adaptiveRules?.map((rule) => (
+                            <div key={rule}>{rule}</div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </article>
+                )}
 
                 <article className="surface-card side-card">
                   <div className="section-heading compact">
@@ -1109,6 +1331,13 @@ export function App() {
                         <div key={item}>{item}</div>
                       ))}
                     </div>
+                    {(progressInsight.adjustments?.length ?? 0) > 0 && (
+                      <div className="mini-list success">
+                        {progressInsight.adjustments?.map((adjustment) => (
+                          <div key={adjustment}>{adjustment}</div>
+                        ))}
+                      </div>
+                    )}
                     <div className="next-move">{progressInsight.nextMove}</div>
                   </article>
                 )}
@@ -1130,19 +1359,32 @@ export function App() {
                 </button>
               </div>
 
-              <div className="chat-messages">
-                {chatMessages.length === 0 && (
-                  <div className="chat-empty">
-                    <PathGlyph />
-                    <p>
+                <div className="chat-messages">
+                  {chatMessages.length === 0 && (
+                    <div className="chat-empty">
+                      <PathGlyph />
+                      <p>
                       Ask Path101 to rethink the roadmap, simplify the next step,
                       build a study strategy, or help when stress is affecting execution.
-                    </p>
-                  </div>
-                )}
-                {chatMessages.map((message, index) => (
-                  <ChatBubble key={`${message.role}-${index}`} role={message.role} text={message.text} />
-                ))}
+                      </p>
+                      <div className="chat-suggestion-row">
+                        {chatSuggestions.map((suggestion) => (
+                          <button
+                            key={suggestion}
+                            className="chat-suggestion"
+                            type="button"
+                            onClick={() => void runChat(suggestion)}
+                            disabled={loading}
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {chatMessages.map((message, index) => (
+                    <ChatBubble key={`${message.role}-${index}`} role={message.role} text={message.text} />
+                  ))}
                 {loading && (
                   <div className="chat-bubble ai">
                     <span className="chat-avatar">P</span>
@@ -1164,6 +1406,19 @@ export function App() {
                   Send
                 </button>
               </form>
+              <div className="chat-suggestion-row compact">
+                {chatSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    className="chat-suggestion"
+                    type="button"
+                    onClick={() => void runChat(suggestion)}
+                    disabled={loading}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
             </div>
           </section>
         )}

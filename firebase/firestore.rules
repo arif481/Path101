@@ -24,6 +24,20 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    match /plans/{planId} {
+      allow create: if isSignedIn();
+      allow read, update: if isSignedIn()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /sessions/{sessionId} {
+      allow create: if isSignedIn();
+      allow read, update: if isSignedIn()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
     match /workspaces/{workspaceId} {
       allow create: if isSignedIn();
       allow read, update: if isSignedIn()
@@ -45,6 +59,12 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    match /banditLogs/{logId} {
+      allow create: if isSignedIn();
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
     match /safetyFlags/{flagId} {
       allow create: if isSignedIn();
       allow read, update: if isAdmin();
@@ -60,6 +80,29 @@ service cloud.firestore {
       allow read: if isAdmin()
         || (isSignedIn() && resource.data.userId == request.auth.uid);
       allow update: if isAdmin();
+    }
+
+    match /deadLetterJobs/{jobId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /deadLetterReplayAudits/{auditId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /workerMetrics/{metricId} {
+      allow create: if isSignedIn();
+      allow read: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    match /taskQueue/{taskId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /schedulerLocks/{lockId} {
+      allow read, write: if false;
     }
 
     match /{document=**} {

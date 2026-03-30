@@ -14,6 +14,7 @@ import type {
   ProgressCheckIn,
   StudentProfileInput,
   WorkspaceAction,
+  WorkspaceFocusMode,
   WorkspaceMilestone,
   WorkspaceModule,
 } from "../../types/workspace";
@@ -38,6 +39,8 @@ const chatModel = genAI?.getGenerativeModel({
   },
 });
 
+type ChatMode = "planning" | "study" | "recovery" | "accountability" | "decision" | "general";
+
 function parseJsonResponse<T>(raw: string): T {
   const normalized = raw
     .trim()
@@ -60,6 +63,11 @@ function slugId(prefix: string, label: string, index: number): string {
   return `${prefix}_${normalized || "item"}_${index + 1}`;
 }
 
+function describeInput(value?: string): string {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : "Not provided";
+}
+
 function summarizeProfile(profile: StudentProfileInput): string {
   return [
     `Goal: ${profile.goal}`,
@@ -67,10 +75,29 @@ function summarizeProfile(profile: StudentProfileInput): string {
     `Weekly capacity: ${profile.weeklyCapacity}`,
     `Current reality: ${profile.currentReality}`,
     `Support needs: ${profile.supportNeeds}`,
+    `Success definition: ${describeInput(profile.successDefinition)}`,
+    `Biggest blocker: ${describeInput(profile.biggestBlocker)}`,
+    `Preferred system mode: ${describeInput(profile.studentMode)}`,
   ].join("\n");
 }
 
+function deriveRiskLevel(profile: StudentProfileInput): "stable" | "watch" | "critical" {
+  const combined = [
+    profile.goal,
+    profile.currentReality,
+    profile.supportNeeds,
+    profile.biggestBlocker,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  if (/(self-harm|suicid|kill myself|unsafe)/i.test(combined)) return "critical";
+  if (/(burnout|panic|overwhelm|anxious|depress|exhaust|fatigue|crash)/i.test(combined)) return "watch";
+  return "stable";
+}
+
 function fallbackAnalysis(profile: StudentProfileInput): AIStudentAnalysis {
+  const riskLevel = deriveRiskLevel(profile);
   const priorities = [
     "Clarify the success criteria for the goal",
     "Build a weekly execution rhythm that fits real capacity",
@@ -109,6 +136,19 @@ function fallbackAnalysis(profile: StudentProfileInput): AIStudentAnalysis {
       "Include recovery and emotional regulation if stress starts blocking action",
     ],
     energyProfile: "Best suited for a balanced system with low-friction starts and visible wins.",
+    diagnosticHeadline: "This student needs a system that protects consistency more than intensity.",
+    operatingMode:
+      profile.studentMode?.trim() || (riskLevel === "watch" ? "Recovery-aware momentum mode" : "Balanced momentum mode"),
+    riskLevel,
+    leveragePoints: [
+      "Reduce startup friction so work begins before motivation negotiations start",
+      "Use visible proof of progress to lower anxiety and improve follow-through",
+      "Treat energy dips as a signal to adapt the plan, not abandon it",
+    ],
+    expertNotes: [
+      "The student probably does not need more ambition; they need a more survivable operating rhythm.",
+      "The best system will create calm through clarity, then use small wins to grow confidence.",
+    ],
     safetyAlert: null,
   };
 }
@@ -197,6 +237,44 @@ function fallbackMilestones(goal: string): WorkspaceMilestone[] {
       outcomes: [
         "Progress artifacts collected",
         "Support system refined from real data",
+      ],
+    },
+  ];
+}
+
+function fallbackFocusModes(): WorkspaceFocusMode[] {
+  return [
+    {
+      id: "focus_mode_start",
+      title: "Start friction downshift",
+      trigger: "Use when the task feels heavier than it should.",
+      description: "Shrinks activation energy so starting stops feeling like a negotiation.",
+      moves: [
+        "Cut the next move to a 10-minute proof-of-start",
+        "Open only the one tab or document that matters",
+        "Define what 'done enough' looks like before starting",
+      ],
+    },
+    {
+      id: "focus_mode_deep",
+      title: "Protected deep-work burst",
+      trigger: "Use when clarity is high and you have one clean block.",
+      description: "Turns a good focus window into visible strategic progress instead of scattered effort.",
+      moves: [
+        "Pick one milestone outcome, not three side quests",
+        "Work in a 45-minute block with a tiny post-block review",
+        "Capture distractions without switching context",
+      ],
+    },
+    {
+      id: "focus_mode_reset",
+      title: "Recovery-preserving reset",
+      trigger: "Use when stress climbs and momentum starts slipping.",
+      description: "Protects the goal by lightening the load before the system breaks.",
+      moves: [
+        "Keep one core commitment and defer the rest",
+        "Swap high-energy work for one low-friction maintenance task",
+        "Reset your environment before deciding the day is lost",
       ],
     },
   ];
@@ -315,6 +393,8 @@ function fallbackWorkspace(
         value: 72,
         targetLabel: "Goal and roadmap aligned",
         insight: "The direction is strong. The next gain comes from translating it into repeatable weekly behavior.",
+        trend: "up",
+        deltaLabel: "Direction is sharpening",
       },
       {
         id: "metric_execution",
@@ -322,6 +402,8 @@ function fallbackWorkspace(
         value: 48,
         targetLabel: "Consistent 3-week cadence",
         insight: "Momentum exists, but it still needs structure that survives friction.",
+        trend: "steady",
+        deltaLabel: "Needs protection",
       },
       {
         id: "metric_capacity",
@@ -329,6 +411,8 @@ function fallbackWorkspace(
         value: 61,
         targetLabel: "Plan matches real energy",
         insight: "The system should respect mental load and protect recovery on heavy weeks.",
+        trend: "up",
+        deltaLabel: "More realistic",
       },
     ],
     milestones,
@@ -355,6 +439,17 @@ function fallbackWorkspace(
         ],
       },
     ],
+    weeklyBlueprint: [
+      "Monday: decide the one milestone outcome that matters most this week",
+      "Midweek: protect one deep-work block and one low-energy maintenance block",
+      "Friday: review proof of progress, friction, and what to simplify next",
+    ],
+    adaptiveRules: [
+      "When stress rises, shrink the next step before adding more pressure",
+      "When clarity drops, return to the milestone outcome instead of browsing tasks",
+      "When consistency breaks, restart with a proof-of-start action the same day",
+    ],
+    focusModes: fallbackFocusModes(),
   };
 }
 
@@ -389,6 +484,8 @@ function sanitizeWorkspace(workspace: AIWorkspace): AIWorkspace {
       ...metric,
       id: metric.id || slugId("metric", metric.label, index),
       value: clampPercent(metric.value),
+      trend: metric.trend || "steady",
+      deltaLabel: metric.deltaLabel || "Live signal",
     })),
     modules: workspace.modules.map((module, index) => ({
       ...module,
@@ -399,6 +496,12 @@ function sanitizeWorkspace(workspace: AIWorkspace): AIWorkspace {
     checkIns: workspace.checkIns.map((checkIn, index) => ({
       ...checkIn,
       id: checkIn.id || slugId("checkin", checkIn.title, index),
+    })),
+    weeklyBlueprint: workspace.weeklyBlueprint ?? [],
+    adaptiveRules: workspace.adaptiveRules ?? [],
+    focusModes: (workspace.focusModes ?? []).map((mode, index) => ({
+      ...mode,
+      id: mode.id || slugId("mode", mode.title, index),
     })),
   };
 }
@@ -442,6 +545,11 @@ Return JSON with this exact shape:
   "supportModes": ["2-5 ways the app should support this student"],
   "mentalHealthConsiderations": ["0-3 notes only if relevant to execution or capacity"],
   "energyProfile": "How the plan should pace itself",
+  "diagnosticHeadline": "One-line expert diagnosis",
+  "operatingMode": "The system mode this student should run in",
+  "riskLevel": "stable | watch | critical",
+  "leveragePoints": ["2-4 highest leverage moves"],
+  "expertNotes": ["2-3 notes from an expert perspective"],
   "safetyAlert": null
 }
 
@@ -449,6 +557,8 @@ Rules:
 - Path101 is not a therapy-only app.
 - Mental health matters when it affects the student's capacity, focus, or safety.
 - Do not prescribe predefined features. Recommend forms of support.
+- Think like a synthesis of an academic strategist, executive-function coach, learning scientist, and wellbeing-aware performance coach.
+- Make the diagnosis sharp. Avoid generic encouragement masquerading as analysis.
 - If the student sounds unsafe or at risk of self-harm, set "safetyAlert" to a concise urgent message telling them to contact local emergency services or a crisis hotline immediately and to reach a trusted person now.`;
 
   return generateJsonOrFallback(prompt, () => fallbackAnalysis(profile));
@@ -501,7 +611,9 @@ Return JSON with this exact shape:
       "label": "Metric label",
       "value": 0-100,
       "targetLabel": "What good looks like",
-      "insight": "What this metric means"
+      "insight": "What this metric means",
+      "trend": "up | steady | down",
+      "deltaLabel": "Short trend label"
     }
   ],
   "milestones": [
@@ -536,6 +648,17 @@ Return JSON with this exact shape:
       "frequency": "How often",
       "prompts": ["2-4 prompts"]
     }
+  ],
+  "weeklyBlueprint": ["3-5 short lines describing the weekly operating rhythm"],
+  "adaptiveRules": ["3-5 if-then rules for adapting the system"],
+  "focusModes": [
+    {
+      "id": "mode_id",
+      "title": "Mode title",
+      "trigger": "When to use this mode",
+      "description": "Why this mode exists",
+      "moves": ["2-4 clear steps"]
+    }
   ]
 }
 
@@ -544,6 +667,7 @@ Rules:
 - Use 4-6 modules, 3-5 metrics, 3-4 milestones, 6-10 actions, and 2-3 check-ins.
 - Mental health should appear only where it supports the main goal or protects capacity.
 - Make it visualizable: clear labels, crisp outcomes, strong action wording.
+- Make it expert: every part should feel like it was designed by someone who understands student performance systems, not just task management.
 - Keep action ids and milestone actionIds consistent.`;
 
   const workspace = await generateJsonOrFallback(prompt, () => fallbackWorkspace(profile, analysis));
@@ -598,6 +722,14 @@ function fallbackInsight(
       latest && latest.focus <= 2
         ? "Shrink the next action, reduce context switching, and protect one clean work block."
         : "Complete one core action today, then review whether the system still fits your real week.",
+    adjustments: [
+      latest && latest.stress >= 4
+        ? "Switch to a recovery-aware plan for the next 24 hours"
+        : "Keep one visible core action at the center of the day",
+      latest && latest.focus <= 2
+        ? "Reduce context switching and lower startup friction"
+        : "Preserve one protected focus block before adding more tasks",
+    ],
   };
 }
 
@@ -615,7 +747,8 @@ Return JSON:
   "momentum": "What the current momentum pattern means",
   "wins": ["2-4 real wins"],
   "friction": ["1-3 bottlenecks"],
-  "nextMove": "The best next move"
+  "nextMove": "The best next move",
+  "adjustments": ["2-4 concrete system adjustments"]
 }
 
 Rules:
@@ -642,24 +775,56 @@ function buildWorkspaceContext(workspace?: AIWorkspace | null): string {
 - Title: ${workspace.workspaceTitle}
 - Strategy: ${workspace.strategy}
 - Milestones: ${milestoneSummary}
-- Actions: ${actionSummary}`;
+- Actions: ${actionSummary}
+- Adaptive rules: ${(workspace.adaptiveRules ?? []).join("; ") || "None"}
+- Focus modes: ${(workspace.focusModes ?? []).map((mode) => mode.title).join("; ") || "None"}`;
+}
+
+function inferChatMode(message: string): ChatMode {
+  if (/(study|exam|revision|learn|memor|practice|subject|class|assignment)/i.test(message)) return "study";
+  if (/(stress|overwhelm|panic|burnout|anxious|tired|exhaust|mental)/i.test(message)) return "recovery";
+  if (/(accountability|keep me on track|check in|follow through|consistent|discipline)/i.test(message)) return "accountability";
+  if (/(choose|decide|which|option|priority|should i)/i.test(message)) return "decision";
+  if (/(plan|roadmap|schedule|next|break down|organize)/i.test(message)) return "planning";
+  return "general";
+}
+
+function chatModeGuidance(mode: ChatMode): string {
+  switch (mode) {
+    case "study":
+      return "Act like a sharp learning strategist. Optimize for comprehension, retention, sequencing, and manageable study structure.";
+    case "recovery":
+      return "Act like a wellbeing-aware performance coach. Reduce overload, protect safety, and adapt the plan without sounding clinical.";
+    case "accountability":
+      return "Act like an execution coach. Be direct, specific, and momentum-oriented with clear follow-through cues.";
+    case "decision":
+      return "Act like a strategic advisor. Compare options, name tradeoffs, and recommend the strongest path with reasons.";
+    case "planning":
+      return "Act like an expert planner. Translate the situation into a clear sequence, scope, and next steps.";
+    default:
+      return "Act like an adaptive student success strategist who keeps advice practical and high leverage.";
+  }
 }
 
 function fallbackChatReply(message: string, workspace?: AIWorkspace | null): string {
   const hasWorkspace = Boolean(workspace);
 
   if (/stress|overwhelm|burnout|anxious|panic/i.test(message)) {
-    return "Let’s reduce the load before we ask for more effort. Pick one core action worth keeping, move everything else to later, and spend 10 minutes resetting your environment or breathing so the next step feels startable again.";
+    return "Protect the system before you push it harder. Keep one core commitment, cut everything else to optional, reset your environment for 10 minutes, and choose the smallest action that still counts as real progress.";
+  }
+
+  if (/study|exam|revision|learn|practice/i.test(message)) {
+    return "Use a tighter study loop: pick one topic, define the output you need, do one focused practice block, and finish with a 3-minute recall test so the session produces evidence instead of just time spent.";
   }
 
   if (/plan|roadmap|next/i.test(message)) {
     return hasWorkspace
-      ? "Work from the dashboard in this order: one core action today, one system tweak this week, then a short review. That keeps momentum visible without turning the goal into a giant vague obligation."
+      ? "Work from the system in this order: one core action today, one structural improvement this week, then a short review. That keeps momentum visible without letting the goal dissolve into vague effort."
       : "Start by naming the exact outcome, the timeframe, and how many hours you can honestly give each week. Path101 can then build the right system around that instead of giving generic advice.";
   }
 
   return hasWorkspace
-    ? "Use the workspace as your control room: choose the smallest high-impact action, protect enough energy to finish it, and let the rest of the plan wait until that move is done."
+    ? "Use the workspace like a control room: pick the highest-leverage next move, match it to your real energy, and let visible proof of progress matter more than doing everything at once."
     : "Describe the goal, your current constraints, and where you feel stuck. The clearer the reality, the better Path101 can build something that actually fits you.";
 }
 
@@ -670,6 +835,7 @@ export async function chat(
 ): Promise<string> {
   if (!chatModel) return fallbackChatReply(message, workspace);
 
+  const mode = inferChatMode(message);
   const historyPrompt = history
     .map((entry) => `${entry.role === "user" ? "Student" : "Path101"}: ${entry.text}`)
     .join("\n");
@@ -678,11 +844,18 @@ export async function chat(
 
 You help with planning, academics, habits, execution, and wellbeing support when needed.
 You are not therapy-only, and you do not sound clinical.
-Be concise, warm, practical, and strategic.
+Be concise, warm, practical, strategic, and expert.
+${chatModeGuidance(mode)}
 
 ${buildWorkspaceContext(workspace)}
 ${historyPrompt ? `\nConversation so far:\n${historyPrompt}\n` : ""}
 Student: ${message}
+
+Rules:
+- Give the strongest recommendation first.
+- Name tradeoffs when there are multiple good paths.
+- Prefer concrete next actions over abstract motivation.
+- If the student sounds unsafe, tell them to contact local emergency services or a crisis line immediately and reach a trusted person now.
 
 Path101:`;
 
