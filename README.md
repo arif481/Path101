@@ -1,6 +1,8 @@
 # Path101
 
-Path101 is an AI-generated student success operating system.
+Path101 is a student success app. You give it a goal, and it uses Gemini to build a personal workspace for reaching it.
+
+**Live:** https://path101.web.app
 
 It is meant to build whatever a student needs to achieve a goal: roadmap, execution system, study structure, habit support, wellbeing support, progress visuals, and adaptive check-ins. Mental health is part of the product when it affects capacity, but the app is not a mental-health-only tool.
 
